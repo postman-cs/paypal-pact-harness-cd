@@ -10,14 +10,20 @@ const out = join(root, 'dist');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const packed = spawnSync(npm, [
+const npmArgs = [
   'pack',
   join(root, 'tools', 'pact-harness'),
   '--pack-destination',
   out,
   '--json',
-], { encoding: 'utf8' });
+];
+const packed = process.env.npm_execpath
+  ? spawnSync(process.execPath, [process.env.npm_execpath, ...npmArgs], { encoding: 'utf8' })
+  : spawnSync('npm', npmArgs, {
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    });
+if (packed.error) throw packed.error;
 if (packed.status !== 0) throw new Error(packed.stderr || packed.stdout || 'npm pack failed');
 const metadata = JSON.parse(packed.stdout);
 const filename = metadata[0]?.filename;
