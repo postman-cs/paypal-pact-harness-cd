@@ -22,7 +22,7 @@ flowchart TB
 
   subgraph Build["Source, supply chain, and portable release"]
     EngineSource["Engine source<br/>src/"]
-    UnitTests["53 deterministic tests<br/>test/"]
+    UnitTests["73 deterministic tests<br/>test/"]
     LockedCS["Real postman-cs comparator<br/>full commit + SHA-256 lock"]
     BundleBuild["Deterministic bundle builder"]
     Bundle["Install-free Node CLI bundle<br/>tools/pact-harness/"]
@@ -183,4 +183,3 @@ sequenceDiagram
 | Harness | Kubernetes execution, JUnit presentation, and deployment/promotion control |
 | Kubernetes | Ephemeral lower-environment runtime isolation |
 | Optional git ledger | Low-infrastructure version/deployment compatibility history |
-

@@ -31,7 +31,7 @@ pipeline:
       value: lower
     - name: LEDGER_REPO
       type: String
-      value: <+input>          # e.g. github.com/danielshively-source/paypal-contracts
+      value: <+input>          # e.g. github.com/postman-cs/paypal-contracts
   stages:
     - stage:
         name: Contract gate (real consumer)

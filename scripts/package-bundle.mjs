@@ -10,7 +10,8 @@ const out = join(root, 'dist');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-const packed = spawnSync('npm', [
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const packed = spawnSync(npm, [
   'pack',
   join(root, 'tools', 'pact-harness'),
   '--pack-destination',

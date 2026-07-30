@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": { "title": "checkout-consumer", "version": "1.0.0" },
-  "x-note": "The CONSUMER's own OAS — only the operation + fields the checkout service consumes from PayPal Orders. Both sides OAS-sourced; cross-verified against the provider's full OAS. Renaming `status` on the provider breaks it.",
+  "x-note": "The CONSUMER's own OAS — only the operation, positive fields, and negative fields the checkout service consumes from PayPal Orders. Both sides OAS-sourced; cross-verified against the provider's full OAS. Renaming `status` on the provider breaks it.",
   "paths": {
     "/v2/checkout/orders/{id}": {
       "get": {
@@ -14,9 +14,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "string" },
-                    "status": { "type": "string" },
-                    "intent": { "type": "string" },
+                    "id": { "type": "string", "example": "5O190127TN364715T" },
+                    "status": { "type": "string", "example": "COMPLETED" },
+                    "intent": { "type": "string", "example": "CAPTURE" },
                     "purchase_units": {
                       "type": "array",
                       "items": {
@@ -24,11 +24,26 @@
                         "properties": {
                           "amount": {
                             "type": "object",
-                            "properties": { "value": { "type": "string" } }
+                            "properties": { "value": { "type": "string", "example": "100.00" } }
                           }
                         }
                       }
                     }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The error fields this consumer handles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string", "example": "RESOURCE_NOT_FOUND" },
+                    "message": { "type": "string", "example": "The specified resource does not exist." },
+                    "debug_id": { "type": "string", "example": "contract-demo-debug-id" }
                   }
                 }
               }

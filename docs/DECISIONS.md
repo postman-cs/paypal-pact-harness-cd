@@ -100,3 +100,12 @@ Pacts, provider versions, verification results, and deployed-version records.
 It is a low-infrastructure phase-0 option, not a claim of Pact Broker feature parity.
 Use an OSS Pact Broker or PactFlow when selectors, pending/WIP pacts, webhooks, and
 broker governance become requirements.
+
+## D14 — One TPE profile and two commands
+
+`paypal-contract-gate.config.json` is the reviewed, secret-free service profile.
+`doctor` validates the runtime, every input, the lower-only safety lock, and the
+Postman-CS provenance. `verify --clean` executes and seals the entire gate. Advanced
+flags remain in the low-level bundle, but PayPal TPE onboarding does not depend on
+them. CI proves the same path on Linux, Windows, and macOS at the Node 20 floor and
+tests the extracted release in a clean directory whose path contains spaces.

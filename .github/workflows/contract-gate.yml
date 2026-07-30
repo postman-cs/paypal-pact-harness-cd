@@ -35,8 +35,14 @@ jobs:
         run: |
           npm run build:bundle
           git diff --exit-code -- tools/pact-harness
+      - name: Prove the PayPal TPE two-command path
+        run: |
+          node paypal-contract-gate.mjs doctor
+          node paypal-contract-gate.mjs verify --clean
       - name: Package the platform-agnostic CLI release
         run: npm run package:bundle
+      - name: Test the packed bundle outside the repository
+        run: npm run test:packed
       - name: Run consumer and application contract action
         id: contract
         uses: ./
@@ -90,6 +96,31 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 30
+
+  tpe-quick-start-portability:
+    name: TPE quick start (${{ matrix.os }}, Node 20)
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2022
+          - macos-14
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up minimum supported Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install development dependencies
+        run: npm ci
+      - name: Test source, simple entry, and extracted release bundle
+        run: npm run test:all
+      - name: Verify the rebuilt bundle is committed
+        run: git diff --exit-code -- tools/pact-harness
 
   spring-lower-environment:
     name: Spring Boot lower-environment proof
@@ -188,6 +219,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - engine-and-action
+      - tpe-quick-start-portability
       - spring-lower-environment
     runs-on: ubuntu-24.04
     steps:

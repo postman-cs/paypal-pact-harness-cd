@@ -1,15 +1,18 @@
-# PAYPAL DROP-IN — consumer-authored BDC plus bidirectional application-route
-# comparison. Import this stage before an existing promotion stage. It runs on
-# KubernetesDirect, targets only the lower environment, and produces JUnit + JSON.
+# PAYPAL TPE DROP-IN
+#
+# Import this stage immediately before an existing promotion stage. Contract
+# paths, subset, policy, exceptions, and report settings live in one reviewed
+# repository profile. Harness supplies only its connectors, lower runtime URLs,
+# and secrets.
 stage:
   name: Contract - Consumer and route gate
   identifier: consumer_contract_gate
   type: CI
   variables:
-    - name: environment_name
+    - name: config_path
       type: String
       required: true
-      value: <+input>.default(lower)
+      value: <+input>.default(paypal-contract-gate.config.json)
     - name: app_base_url
       type: String
       required: true
@@ -22,43 +25,9 @@ stage:
       type: String
       required: true
       value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs)
-    - name: gateway_inventory_url
-      type: String
-      value: <+input>.default("")
-    - name: runtime_traffic_url
-      type: String
-      value: <+input>.default("")
-    - name: provider_oas_path
-      type: String
-      required: true
-      value: <+input>.default(fixtures/paypal/checkout_orders_v2.json)
-    - name: consumer_contract_path
-      type: String
-      required: true
-      value: <+input>.default(fixtures/paypal/orders-consumer.pact.json)
-    - name: subset_path
-      type: String
-      required: true
-      value: <+input>.default(config/subsets/orders-demo.json)
-    - name: contract_policy_path
-      type: String
-      required: true
-      value: <+input>.default(config/contract-policy.json)
-    - name: route_exceptions_path
-      type: String
-      required: true
-      value: <+input>.default(config/route-exceptions.json)
     - name: postman_collection_id
       type: String
       value: <+input>.default("")
-    - name: route_policy
-      type: String
-      required: true
-      value: <+input>.default(block).allowedValues(block,warn)
-    - name: complete_results
-      type: String
-      required: true
-      value: <+input>.default(true).allowedValues(true,false)
   spec:
     cloneCodebase: true
     platform:
@@ -68,97 +37,31 @@ stage:
       steps:
         - step:
             type: Run
-            name: Collect authoritative and secondary route inventories
-            identifier: collect_route_inventories
+            name: Verify the lower service from the repository profile
+            identifier: verify_lower_contract_profile
             spec:
               connectorRef: <+input>
               image: node:24-bookworm-slim
               shell: Sh
               envVariables:
-                APP_BASE_URL: <+stage.variables.app_base_url>
-                ACTUATOR_URL: <+stage.variables.actuator_url>
-                GENERATED_OPENAPI_URL: <+stage.variables.generated_openapi_url>
-                GATEWAY_INVENTORY_URL: <+stage.variables.gateway_inventory_url>
-                RUNTIME_TRAFFIC_URL: <+stage.variables.runtime_traffic_url>
-                ENVIRONMENT_NAME: <+stage.variables.environment_name>
+                CONFIG_PATH: <+stage.variables.config_path>
+                PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
+                PAYPAL_CONTRACT_OPENAPI_URL: <+stage.variables.generated_openapi_url>
+                INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
-                [ "$ENVIRONMENT_NAME" = "lower" ] || {
-                  echo "First validation is locked to environment_name=lower" >&2
-                  exit 2
-                }
-                node tools/pact-harness/scripts/collect-route-inventories.mjs \
-                  --actuator-url "$ACTUATOR_URL" \
-                  --openapi-url "$GENERATED_OPENAPI_URL" \
-                  --gateway-url "$GATEWAY_INVENTORY_URL" \
-                  --traffic-url "$RUNTIME_TRAFFIC_URL" \
-                  --out-dir .contract-reports/inventory
-        - step:
-            type: Run
-            name: Complete consumer contract gate
-            identifier: complete_consumer_contract_gate
-            spec:
-              connectorRef: <+input>
-              image: node:24-bookworm-slim
-              shell: Sh
-              envVariables:
-                PROVIDER_OAS_PATH: <+stage.variables.provider_oas_path>
-                CONSUMER_CONTRACT_PATH: <+stage.variables.consumer_contract_path>
-                SUBSET_PATH: <+stage.variables.subset_path>
-                CONTRACT_POLICY_PATH: <+stage.variables.contract_policy_path>
-                ROUTE_EXCEPTIONS_PATH: <+stage.variables.route_exceptions_path>
-                ROUTE_POLICY: <+stage.variables.route_policy>
-                COMPLETE_RESULTS: <+stage.variables.complete_results>
-                ENVIRONMENT_NAME: <+stage.variables.environment_name>
-              command: |
-                set -eu
-                set -- \
-                  --oas "$PROVIDER_OAS_PATH" \
-                  --pact "$CONSUMER_CONTRACT_PATH" \
-                  --routes .contract-reports/inventory/actuator-mappings.json \
-                  --subset "$SUBSET_PATH" \
-                  --policy "$CONTRACT_POLICY_PATH" \
-                  --exceptions "$ROUTE_EXCEPTIONS_PATH" \
-                  --environment "$ENVIRONMENT_NAME" \
-                  --route-policy "$ROUTE_POLICY" \
-                  --report-dir .contract-reports
-                [ "$COMPLETE_RESULTS" != true ] || set -- "$@" --complete-results
-                node tools/pact-harness/contract-gate.mjs "$@"
+                node paypal-contract-gate.mjs verify \
+                  --config "$CONFIG_PATH" \
+                  --clean
               reports:
                 type: JUnit
                 spec:
                   paths:
                     - .contract-reports/contract-gate-summary.xml
                     - .contract-reports/oas-audit.xml
+                    - .contract-reports/oas-diff.xml
                     - .contract-reports/consumer-bdc.xml
                     - .contract-reports/route-contract.xml
-        - step:
-            type: Run
-            name: Cross-check generated OpenAPI inventory
-            identifier: cross_check_generated_openapi
-            spec:
-              connectorRef: <+input>
-              image: node:24-bookworm-slim
-              shell: Sh
-              envVariables:
-                PROVIDER_OAS_PATH: <+stage.variables.provider_oas_path>
-                SUBSET_PATH: <+stage.variables.subset_path>
-                ROUTE_EXCEPTIONS_PATH: <+stage.variables.route_exceptions_path>
-                ROUTE_POLICY: <+stage.variables.route_policy>
-              command: |
-                set -eu
-                node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
-                  --spec "$PROVIDER_OAS_PATH" \
-                  --routes .contract-reports/inventory/generated-openapi.json \
-                  --subset "$SUBSET_PATH" \
-                  --exceptions "$ROUTE_EXCEPTIONS_PATH" \
-                  --policy "$ROUTE_POLICY" \
-                  --json-out .contract-reports/generated-openapi-route-contract.json \
-                  --junit-out .contract-reports/generated-openapi-route-contract.xml
-              reports:
-                type: JUnit
-                spec:
-                  paths:
                     - .contract-reports/generated-openapi-route-contract.xml
         - step:
             type: Run
@@ -176,18 +79,15 @@ stage:
               command: |
                 set -eu
                 npm install --global postman-cli@1.44.0
-                if [ -n "$POSTMAN_COLLECTION_ID" ]; then
-                  node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
-                    --collection "$POSTMAN_COLLECTION_ID" \
-                    --base-url "$APP_BASE_URL" \
-                    --out-dir .contract-reports/postman \
-                    --cloud
-                else
-                  node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
-                    --collection fixtures/paypal/orders-lower.postman_collection.json \
-                    --base-url "$APP_BASE_URL" \
-                    --out-dir .contract-reports/postman
-                fi
+                COLLECTION="$POSTMAN_COLLECTION_ID"
+                [ -n "$COLLECTION" ] ||
+                  COLLECTION=fixtures/paypal/orders-lower.postman_collection.json
+                set -- \
+                  --collection "$COLLECTION" \
+                  --base-url "$APP_BASE_URL" \
+                  --out-dir .contract-reports/postman
+                [ -z "$POSTMAN_COLLECTION_ID" ] || set -- "$@" --cloud
+                node tools/pact-harness/scripts/postman/run-lower-collection.mjs "$@"
               reports:
                 type: JUnit
                 spec:
@@ -195,8 +95,8 @@ stage:
                     - .contract-reports/postman/postman-run.xml
         - step:
             type: Run
-            name: Seal JSON evidence
-            identifier: seal_json_evidence
+            name: Seal all JSON and JUnit evidence
+            identifier: seal_all_evidence
             spec:
               connectorRef: <+input>
               image: node:24-bookworm-slim
@@ -207,8 +107,10 @@ stage:
                 import { createHash } from 'node:crypto';
                 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
                 const files = readdirSync('.contract-reports', { recursive: true })
-                  .filter((file) => String(file).endsWith('.json'))
                   .map(String)
+                  .filter((file) =>
+                    file !== 'evidence-manifest.json' &&
+                    (file.endsWith('.json') || file.endsWith('.xml') || file.endsWith('.txt')))
                   .sort();
                 const evidence = files.map((file) => {
                   const content = readFileSync(`.contract-reports/${file}`);

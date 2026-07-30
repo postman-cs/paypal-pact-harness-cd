@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Build dist/ — a self-contained, install-free, platform-agnostic CLI bundle
-// (Decision D13). Any runner executes `node dist/pact-harness.mjs <cmd>` with NO
-// `npm install` and NO repo checkout. Keeps `yaml` by vendoring its node build to
-// dist/vendor/yaml (git-natural, not under node_modules) and rewriting the single
+// Build tools/pact-harness — a self-contained, install-free, platform-agnostic CLI
+// bundle (Decision D13). Any runner executes `node paypal-contract-gate.mjs` with
+// NO `npm install` and NO source checkout. Keeps `yaml` by vendoring its node build
+// (git-natural, not under node_modules) and rewriting the single
 // `import ... from 'yaml'` in the copied load.mjs to a relative path.
 //
 //   node scripts/build-bundle.mjs
@@ -64,36 +64,51 @@ const load = readFileSync(loadPath, 'utf8').replace(
 if (!load.includes('../../vendor/yaml/dist/index.js')) throw new Error('load.mjs yaml import not rewritten — did the import change?');
 writeFileSync(loadPath, load);
 
-// 5. entry + manifest + readme
+// 5. entries + manifest + quick-start example + readme
 writeFileSync(
   join(dist, 'pact-harness.mjs'),
   "#!/usr/bin/env node\n// Self-contained entry — no npm install. Runs the pact-harness CLI dispatch.\nimport './src/cli.mjs';\n",
 );
 writeFileSync(
+  join(dist, 'paypal-contract-gate.mjs'),
+  "#!/usr/bin/env node\n// PayPal TPE entry — config-driven, install-free, and fail-closed.\nimport { main } from './src/tpe-cli.mjs';\nawait main();\n",
+);
+mkdirSync(join(dist, 'examples'), { recursive: true });
+cpSync(
+  join(root, 'paypal-contract-gate.config.json'),
+  join(dist, 'examples', 'paypal-contract-gate.config.json'),
+);
+writeFileSync(
   join(dist, 'package.json'),
   JSON.stringify({
     name: 'pact-harness-bundle',
-    version: '0.2.0',
+    version: '0.3.0',
     private: true,
     type: 'module',
     bin: {
       'pact-harness': './pact-harness.mjs',
-      'paypal-contract-gate': './contract-gate.mjs',
+      'paypal-contract-gate': './paypal-contract-gate.mjs',
+      'paypal-contract-gate-advanced': './contract-gate.mjs',
     },
   }, null, 2) + '\n',
 );
 writeFileSync(
   join(dist, 'README.md'),
   [
-    '# pact-harness — install-free CLI bundle',
+    '# PayPal contract gate — install-free CLI bundle',
     '',
     'Vendored, platform-agnostic build of the pact-harness CLI (Decision D13). No',
-    '`npm install`, no repo checkout, no runtime network dependency. Drop this folder',
-    'into any repo/runner',
-    'and call it directly:',
+    '`npm install`, no repo checkout, and no runtime network dependency for static',
+    'verification. Put the bundle beside a secret-free JSON profile and run:',
     '',
     '```bash',
-    'node pact-harness.mjs can-i-deploy --oas provider.json --pact consumer.pact.json',
+    'node paypal-contract-gate.mjs doctor --config paypal-contract-gate.config.json',
+    'node paypal-contract-gate.mjs verify --config paypal-contract-gate.config.json --clean',
+    '```',
+    '',
+    'The low-level commands remain available for advanced integrations:',
+    '',
+    '```bash',
     'node contract-gate.mjs --oas provider.json --pact consumer.pact.json \\',
     '  --routes runtime-openapi.json --subset subset.json --policy policy.json \\',
     '  --exceptions exceptions.json --environment lower --complete-results',
@@ -103,7 +118,7 @@ writeFileSync(
     'node scripts/ledger-sync.mjs --dir contracts --message "record: ..."',
     '```',
     '',
-    'Commands: `postman-to-pact · oas-to-pact · oas-audit · oas-diff ·',
+    'Low-level commands: `postman-to-pact · oas-to-pact · oas-audit · oas-diff ·',
     'validate-exceptions · bdc-verify · provider-verify · record-verification ·',
     'record-deployment · can-i-deploy`.',
     '',
@@ -114,4 +129,4 @@ writeFileSync(
   ].join('\n'),
 );
 
-console.log('built dist/ — run: node dist/pact-harness.mjs <cmd>');
+console.log('built tools/pact-harness — run: node paypal-contract-gate.mjs doctor');

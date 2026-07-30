@@ -1,10 +1,28 @@
 # paypal-pact-harness-cd
 
-Consumer-driven contract testing (Pact-style static BDC) for PayPal, wired for
-**GitHub Actions and Harness Kubernetes stages**. The gate itself has no server or
-database: it ships as an install-free, platform-agnostic CLI bundle. The first
-end-to-end proof still runs against a real Spring Boot application in a lower
-Kubernetes environment.
+Consumer-driven contract testing for PayPal, packaged as one install-free command
+and one importable Harness Kubernetes stage. The gate has no server or database.
+
+## PayPal TPE: start here
+
+Requirements: Git and Node 20 or newer.
+
+```bash
+git clone https://github.com/postman-cs/paypal-pact-harness-cd.git
+cd paypal-pact-harness-cd
+node paypal-contract-gate.mjs doctor
+node paypal-contract-gate.mjs verify --clean
+```
+
+No `npm install`, Docker, Pact Broker, or dedicated host is needed for this proof.
+The first command checks the machine, profile, files, and locked Postman-CS
+dependency. The second runs the complete lower-environment gate and writes JUnit,
+JSON, and checksums under `.contract-reports/`.
+
+To adapt it, edit the single secret-free
+[`paypal-contract-gate.config.json`](paypal-contract-gate.config.json). For the
+five-minute handoff and live-service environment variables, see
+[`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md).
 
 **Consumer engine source of truth.** This repo carries the engine source
 (`src/`), the tests (`test/`), the build (`scripts/build-bundle.mjs` → `tools/pact-harness`),
@@ -15,7 +33,7 @@ detection vendor the exact comparator from the production
 repository at the full commit and SHA-256 recorded in `postman-cs.lock.json`. CI
 verifies that digest before executing it, with no runtime network dependency.
 
-## Run the demo (zero setup, no Harness needed to see it work)
+## Optional ledger demo
 
 ```bash
 node demo/demo.mjs
@@ -56,7 +74,7 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
 The complete component map and execution sequence are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Develop / rebuild
+## Maintainers: develop / rebuild
 
 ```bash
 npm install          # dev only (yaml, for tests + rebuilding the bundle)
@@ -64,6 +82,8 @@ npm test             # engine, ledger, topology, and supply-chain tests
 npm run check        # determinism: golden pact matches its generator
 npm run build:bundle # regenerate tools/pact-harness/ from src/ (what the pipelines run)
 npm run package:bundle # produce the portable .tgz + SHA-256 release metadata in dist/
+npm run test:packed    # extract the .tgz in a clean path and prove it needs no install
+npm run test:all       # full local release gate
 ```
 The **pipelines never `npm install`** — they call the committed `tools/pact-harness` bundle.
 `npm install` is only for running the tests or rebuilding that bundle.
@@ -75,6 +95,8 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 | `src/`, `test/` | the engine source + its tests (the source of truth) |
 | `scripts/build-bundle.mjs` | builds the install-free bundle from `src/` → `tools/pact-harness/` |
 | `tools/pact-harness/` | the committed, install-free CLI bundle (what the pipelines call) |
+| `paypal-contract-gate.mjs`, `paypal-contract-gate.config.json` | TPE-friendly entry point and single versioned profile |
+| `PAYPAL-TPE-QUICKSTART.md` | clone-to-green handoff and live lower-service setup |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |
 | `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and lower-environment manifest |
 | `config/` | subset selectors, contract policy, governed exceptions, and app/spec graph |

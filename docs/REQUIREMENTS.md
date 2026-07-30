@@ -40,8 +40,8 @@ suite alone is not end-to-end evidence.
 
 ## Required proof sequence
 
-1. Local: 53 engine, topology, schema, security, route, exception, retry, and
-   supply-chain tests pass.
+1. Local: 73 engine, topology, schema, security, route, configuration,
+   quick-start, packaging, exception, retry, and supply-chain tests pass.
 2. Packed CLI: extract the `.tgz` outside the repository and run the complete gate
    without `npm install`.
 3. GitHub: build/test Spring, start it with a secret, collect Actuator and generated

@@ -6,23 +6,31 @@ gate: the consumer engine is the vendored bundle (`tools/pact-harness`) and the
 route comparator is vendored from the real Postman-CS repository with a full commit
 and SHA-256 lock. The build verifies provenance; pipeline runtime stays offline.
 
-## A. Drop-in stage for an existing pipeline
+## A. PayPal TPE drop-in stage
 
 Import `harness/stages/consumer-contract-gate.yaml` before the existing promotion
-stage. Supply:
+stage. The contract inputs are no longer individual Harness variables. They live
+in the reviewed `paypal-contract-gate.config.json` profile and the stage runs the
+same command a developer runs locally:
+
+```bash
+node paypal-contract-gate.mjs verify --config paypal-contract-gate.config.json --clean
+```
+
+Supply only:
 
 - the repository codebase connector;
 - the KubernetesDirect connector and lower-environment namespace;
 - a registry connector for the Node runner image;
-- the lower-environment application, Actuator, and generated OpenAPI URLs;
+- the lower-environment application, Actuator, and generated OpenAPI URLs; and
 - project secrets `paypal_contract_demo_token` and `paypal_postman_api_key`.
 
 The first validation is locked to `environment_name=lower`. The stage publishes
 consumer/audit/route/Postman JUnit, writes JSON for every module, and seals an
 evidence checksum manifest.
 
-The account-specific lower pipeline defaults to the POC collection synced into the
-personal `Bi-Directional` workspace. For another account, run
+If the lower pipeline uses a Postman Cloud collection, sync the POC collection into
+the shared team workspace by running
 `tools/pact-harness/scripts/postman/sync-cloud-collection.mjs` with the target
 workspace ID, then replace `POSTMAN_COLLECTION_ID`.
 
@@ -80,7 +88,7 @@ Secrets already used by this POC (project scope):
 
 Pipeline inputs when you run: codebase connector (this repo), `CONSUMER_COLLECTION_UID`,
 `PROVIDER_SPEC_ID`, `PROVIDER_VERSION` (the version live in the target env), `LEDGER_REPO`
-(e.g. `github.com/danielshively-source/paypal-contracts`).
+(e.g. `github.com/postman-cs/paypal-contracts`).
 
 The gate is read-only with respect to app source and never promotes/deploys. The
 optional ledger write targets only a dedicated contracts repository. Production

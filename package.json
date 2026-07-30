@@ -1,6 +1,6 @@
 {
   "name": "paypal-pact-harness-cd",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Consumer-driven contract testing (Pact BDC) for PayPal, wired for Harness. Self-contained: engine source + tests + the vendored, install-free bundle the pipelines call. The 'broker' is a git-backed ledger (can-i-deploy). No box.",
@@ -8,10 +8,14 @@
     "pact-harness": "./src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "test": "node scripts/run-tests.mjs",
     "check": "node scripts/fixtures-check.mjs && node scripts/validate-contract-topology.mjs",
     "build:bundle": "node scripts/build-bundle.mjs",
     "package:bundle": "node scripts/package-bundle.mjs",
+    "test:packed": "node scripts/test-packed-bundle.mjs",
+    "test:all": "npm test && npm run check && npm run build:bundle && npm run package:bundle && npm run test:packed",
+    "doctor": "node paypal-contract-gate.mjs doctor",
+    "verify:contract": "node paypal-contract-gate.mjs verify --clean",
     "demo": "node demo/demo.mjs"
   },
   "dependencies": {
