@@ -87,7 +87,6 @@ function run(command, args, { cwd, quiet = false } = {}) {
     cwd,
     env: process.env,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
     maxBuffer: 16 * 1024 * 1024,
   });
   if (!quiet && result.stdout) process.stdout.write(result.stdout);
