@@ -13,7 +13,7 @@ pipeline:
   variables:
     - name: POSTMAN_COLLECTION_ID
       type: String
-      value: <+input>.default("")
+      value: <+input>.default("51415493-51c906d4-99bf-4863-9168-f37d55f534b9")
   stages:
     - stage:
         name: Contract - Consumer and route gate
@@ -25,13 +25,13 @@ pipeline:
             value: lower
           - name: app_base_url
             type: String
-            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080
+            value: http://127.0.0.1:8080
           - name: actuator_url
             type: String
-            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/actuator/mappings
+            value: http://127.0.0.1:8080/actuator/mappings
           - name: generated_openapi_url
             type: String
-            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs
+            value: http://127.0.0.1:8080/v3/api-docs
           - name: provider_oas_path
             type: String
             value: fixtures/paypal/checkout_orders_v2.json
@@ -58,6 +58,25 @@ pipeline:
           execution:
             steps:
               - step:
+                  type: Background
+                  name: Orders Spring Boot lower environment
+                  identifier: orders_spring_lower_environment
+                  spec:
+                    connectorRef: <+input>
+                    image: maven:3.9.11-eclipse-temurin-21
+                    shell: Sh
+                    envVariables:
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      cd demo/orders-spring
+                      mvn -B -DskipTests package
+                      exec java -jar target/orders-spring-wrapper-0.1.0.jar
+                    resources:
+                      limits:
+                        memory: 2Gi
+                        cpu: "1"
+              - step:
                   type: Run
                   name: Collect authoritative and secondary route inventories
                   identifier: collect_route_inventories
@@ -71,6 +90,10 @@ pipeline:
                         --actuator-url '<+stage.variables.actuator_url>' \
                         --openapi-url '<+stage.variables.generated_openapi_url>' \
                         --out-dir .contract-reports/inventory
+                    resources:
+                      limits:
+                        memory: 1Gi
+                        cpu: "1"
               - step:
                   type: Run
                   name: Complete consumer contract gate
@@ -100,6 +123,10 @@ pipeline:
                           - .contract-reports/oas-audit.xml
                           - .contract-reports/consumer-bdc.xml
                           - .contract-reports/route-contract.xml
+                    resources:
+                      limits:
+                        memory: 1Gi
+                        cpu: "1"
               - step:
                   type: Run
                   name: Cross-check generated OpenAPI inventory
@@ -123,6 +150,10 @@ pipeline:
                       spec:
                         paths:
                           - .contract-reports/generated-openapi-route-contract.xml
+                    resources:
+                      limits:
+                        memory: 1Gi
+                        cpu: "1"
               - step:
                   type: Run
                   name: Postman CLI lower-environment cases
@@ -154,6 +185,10 @@ pipeline:
                       spec:
                         paths:
                           - .contract-reports/postman/postman-run.xml
+                    resources:
+                      limits:
+                        memory: 2Gi
+                        cpu: "1"
               - step:
                   type: Run
                   name: Seal JSON evidence
@@ -185,11 +220,15 @@ pipeline:
                       );
                       console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
                       NODE
+                    resources:
+                      limits:
+                        memory: 1Gi
+                        cpu: "1"
           infrastructure:
             type: KubernetesDirect
             spec:
               connectorRef: <+input>
-              namespace: paypal-contract-lower
+              namespace: default
               automountServiceAccountToken: false
               nodeSelector: {}
               os: Linux

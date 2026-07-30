@@ -46,7 +46,8 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
 
 - `harness/stages/consumer-contract-gate.yaml` — drop-in KubernetesDirect stage for an
   existing PayPal pipeline; the first run is locked to the `lower` environment.
-- `harness/contract-gate.lower.pipeline.yaml` — complete lower-environment import template.
+- `harness/contract-gate.lower.pipeline.yaml` — complete lower-environment Kubernetes
+  import template with the Spring app as an ephemeral Background step.
 - `harness/contract-gate.self-test.pipeline.yaml` — zero-secret Harness Cloud proof, usable
   while a Kubernetes delegate is unavailable.
 - `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed future service shape,

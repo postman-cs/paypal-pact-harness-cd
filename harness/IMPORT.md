@@ -21,16 +21,23 @@ The first validation is locked to `environment_name=lower`. The stage publishes
 consumer/audit/route/Postman JUnit, writes JSON for every module, and seals an
 evidence checksum manifest.
 
+The account-specific lower pipeline defaults to the POC collection synced into the
+personal `Bi-Directional` workspace. For another account, run
+`tools/pact-harness/scripts/postman/sync-cloud-collection.mjs` with the target
+workspace ID, then replace `POSTMAN_COLLECTION_ID`.
+
 ## B. Lower-environment pipeline
 
 `contract-gate.lower.pipeline.yaml` is the complete KubernetesDirect import shape.
-It targets the Orders Spring wrapper at:
+It starts the Orders Spring wrapper as an authenticated Harness Background step in
+the same ephemeral Kubernetes CI pod, then calls it over `127.0.0.1`. This is the
+canonical first proof because it needs no permanent namespace or ingress and leaves
+no application workload behind.
 
-`http://orders-spring.paypal-contract-lower.svc.cluster.local:8080`
-
-Create `orders-spring-contract-auth` from the same Harness secret, then deploy
-`k8s/orders-spring-lower.yaml` using the immutable image produced by GitHub. Do not
-point the first run at production.
+For a long-lived lower environment, create `orders-spring-contract-auth` from the
+same Harness secret and deploy `k8s/orders-spring-lower.yaml` using the immutable
+image produced by GitHub. The drop-in stage can then target that ClusterIP service.
+Do not point the first run at production.
 
 ## C. Self-test pipeline
 

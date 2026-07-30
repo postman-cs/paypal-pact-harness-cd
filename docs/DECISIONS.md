@@ -27,9 +27,11 @@ OAS-first codegen reduces provider drift but does not make either question redun
 ## D3 — The first runtime proof is lower Kubernetes
 
 The pure contract engine needs no box. End-to-end proof does: the authenticated
-Spring Boot wrapper runs in the existing lower Kubernetes cluster, and the Harness
-stage executes in that cluster before promotion. Production is not an allowed first
-target.
+Spring Boot wrapper runs as a Background step beside the gate in one ephemeral
+Harness KubernetesDirect pod in the existing lower K3s cluster. This avoids a
+permanent POC namespace while still exercising the customer's Kubernetes execution
+path. A digest-pinned manifest supports a persistent lower service later.
+Production is not an allowed first target.
 
 ## D4 — One portable CLI bundle
 
