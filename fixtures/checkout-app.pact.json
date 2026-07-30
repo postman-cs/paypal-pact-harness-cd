@@ -1,0 +1,105 @@
+{
+  "consumer": {
+    "name": "checkout-app"
+  },
+  "provider": {
+    "name": "paypal-orders"
+  },
+  "interactions": [
+    {
+      "description": "Get Order (200)",
+      "request": {
+        "method": "GET",
+        "path": "/orders/123",
+        "query": {
+          "fields": [
+            "id,status"
+          ]
+        },
+        "headers": {
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "id": 123,
+          "status": "COMPLETED",
+          "total": {
+            "amount": "10.00",
+            "currency": "USD"
+          },
+          "items": [
+            {
+              "sku": "SKU-1",
+              "quantity": 2
+            }
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.items": {
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.items[*].quantity": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.items[*].sku": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.amount": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.currency": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "3.0.0"
+    },
+    "generatedBy": "paypal-pact-harness/postman-to-pact"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "info": {
+    "name": "orders-checkout-consumer",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "A consumer of PayPal Orders v2: reads id, status, intent and the first purchase unit's amount. Its saved example response is its contract."
+  },
+  "item": [
+    {
+      "name": "Show order details",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Accept", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer REDACTED" }
+        ],
+        "url": {
+          "raw": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T",
+          "path": ["v2", "checkout", "orders", "5O190127TN364715T"]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "originalRequest": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T",
+              "path": ["v2", "checkout", "orders", "5O190127TN364715T"]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [{ "key": "Content-Type", "value": "application/json" }],
+          "body": "{\n  \"id\": \"5O190127TN364715T\",\n  \"status\": \"COMPLETED\",\n  \"intent\": \"CAPTURE\",\n  \"create_time\": \"2026-01-01T00:00:00Z\",\n  \"purchase_units\": [\n    { \"reference_id\": \"default\", \"amount\": { \"currency_code\": \"USD\", \"value\": \"100.00\" } }\n  ]\n}"
+        }
+      ]
+    }
+  ]
+}

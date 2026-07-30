@@ -1,0 +1,49 @@
+openapi: 3.0.3
+info:
+  title: PayPal Orders API
+  version: "3.0.0"
+# BREAKING variant used to prove the RED path: the response field `status` was
+# renamed to `state`. The codegen'd provider still perfectly matches THIS OAS, so a
+# provider-driven check is green — but a consumer that reads `status` is broken, and
+# the BDC cross-check catches it (response-field-missing).
+paths:
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: fields
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: The order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Not found
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        id: { type: integer }
+        state: { type: string }
+        total:
+          type: object
+          properties:
+            amount: { type: string }
+            currency: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              sku: { type: string }
+              quantity: { type: integer }

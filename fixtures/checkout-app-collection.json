@@ -1,0 +1,44 @@
+{
+  "info": {
+    "name": "checkout-app",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Order",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Accept", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer REDACTED" }
+        ],
+        "url": {
+          "raw": "https://api.sandbox.paypal.com/orders/123?fields=id,status",
+          "path": ["orders", "123"],
+          "query": [{ "key": "fields", "value": "id,status" }]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "originalRequest": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api.sandbox.paypal.com/orders/123?fields=id,status",
+              "path": ["orders", "123"],
+              "query": [{ "key": "fields", "value": "id,status" }]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [
+            { "key": "Content-Type", "value": "application/json" },
+            { "key": "X-Request-Id", "value": "abc-123" }
+          ],
+          "body": "{\n  \"id\": 123,\n  \"status\": \"COMPLETED\",\n  \"total\": { \"amount\": \"10.00\", \"currency\": \"USD\" },\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 2 } ]\n}"
+        }
+      ]
+    }
+  ]
+}

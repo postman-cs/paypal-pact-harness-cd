@@ -1,0 +1,37 @@
+{
+  "info": {
+    "name": "catalog-consumer",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "A consumer of PayPal Catalog Products v1: reads a product's id, name, type and category."
+  },
+  "item": [
+    {
+      "name": "Show product details",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "https://api-m.sandbox.paypal.com/v1/catalogs/products/PROD-123",
+          "path": ["v1", "catalogs", "products", "PROD-123"]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "originalRequest": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api-m.sandbox.paypal.com/v1/catalogs/products/PROD-123",
+              "path": ["v1", "catalogs", "products", "PROD-123"]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [{ "key": "Content-Type", "value": "application/json" }],
+          "body": "{\n  \"id\": \"PROD-123\",\n  \"name\": \"Widget Pro\",\n  \"type\": \"PHYSICAL\",\n  \"category\": \"COMPUTER_ACCESSORIES\",\n  \"description\": \"A configurable widget\"\n}"
+        }
+      ]
+    }
+  ]
+}

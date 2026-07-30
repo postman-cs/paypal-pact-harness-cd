@@ -1,0 +1,108 @@
+{
+  "consumer": {
+    "name": "orders-checkout-consumer"
+  },
+  "provider": {
+    "name": "paypal-orders"
+  },
+  "interactions": [
+    {
+      "description": "Show order details (200)",
+      "request": {
+        "method": "GET",
+        "path": "/v2/checkout/orders/5O190127TN364715T",
+        "headers": {
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "id": "5O190127TN364715T",
+          "status": "COMPLETED",
+          "intent": "CAPTURE",
+          "create_time": "2026-01-01T00:00:00Z",
+          "purchase_units": [
+            {
+              "reference_id": "default",
+              "amount": {
+                "currency_code": "USD",
+                "value": "100.00"
+              }
+            }
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.create_time": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.intent": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.purchase_units": {
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.purchase_units[*].amount.currency_code": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.purchase_units[*].amount.value": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.purchase_units[*].reference_id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "3.0.0"
+    },
+    "generatedBy": "paypal-pact-harness/postman-to-pact"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "info": {
+    "name": "orders-reporting-consumer",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "A second, independent consumer of PayPal Orders v2 — a reporting service that only reads id and create_time. It does NOT read status, so the status rename does not break it."
+  },
+  "item": [
+    {
+      "name": "Show order details",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T",
+          "path": ["v2", "checkout", "orders", "5O190127TN364715T"]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "originalRequest": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T",
+              "path": ["v2", "checkout", "orders", "5O190127TN364715T"]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [{ "key": "Content-Type", "value": "application/json" }],
+          "body": "{\n  \"id\": \"5O190127TN364715T\",\n  \"create_time\": \"2026-01-01T00:00:00Z\"\n}"
+        }
+      ]
+    }
+  ]
+}
