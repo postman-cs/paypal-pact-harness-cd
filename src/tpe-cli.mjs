@@ -163,6 +163,14 @@ function collectLiveRoutes(config, paths, inputs) {
     authoritative: inputs.routes,
     generated: '',
   };
+  const attemptsInput = process.env.PAYPAL_CONTRACT_INVENTORY_ATTEMPTS?.trim();
+  if (attemptsInput && !/^\d+$/.test(attemptsInput)) {
+    throw new Error('PAYPAL_CONTRACT_INVENTORY_ATTEMPTS must be an integer from 1 to 120');
+  }
+  const attempts = attemptsInput ? Number(attemptsInput) : null;
+  if (attempts !== null && (attempts < 1 || attempts > 120)) {
+    throw new Error('PAYPAL_CONTRACT_INVENTORY_ATTEMPTS must be an integer from 1 to 120');
+  }
   const inventoryDir = join(inputs.reports, 'inventory');
   const args = [
     paths.collector,
@@ -170,6 +178,7 @@ function collectLiveRoutes(config, paths, inputs) {
     '--openapi-url', config.application.generatedOpenApiUrl,
     '--out-dir', inventoryDir,
   ];
+  if (attempts !== null) args.push('--attempts', String(attempts));
   if (config.application.gatewayInventoryUrl) args.push('--gateway-url', config.application.gatewayInventoryUrl);
   if (config.application.runtimeTrafficUrl) args.push('--traffic-url', config.application.runtimeTrafficUrl);
   const exit = run(process.execPath, args, { cwd: config.root });

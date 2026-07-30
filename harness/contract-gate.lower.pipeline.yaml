@@ -72,6 +72,7 @@ pipeline:
                     envVariables:
                       PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
                       PAYPAL_CONTRACT_OPENAPI_URL: <+stage.variables.generated_openapi_url>
+                      PAYPAL_CONTRACT_INVENTORY_ATTEMPTS: "60"
                       INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                     command: |
                       set -eu

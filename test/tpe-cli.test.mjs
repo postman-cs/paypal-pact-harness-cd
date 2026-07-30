@@ -152,6 +152,16 @@ test('unsafe configuration and unknown CLI flags fail before running the gate', 
   }
 });
 
+test('invalid live-inventory retry budgets fail before a network request', () => {
+  const result = run(['verify'], {
+    PAYPAL_CONTRACT_ACTUATOR_URL: 'http://127.0.0.1:1/actuator/mappings',
+    PAYPAL_CONTRACT_OPENAPI_URL: 'http://127.0.0.1:1/v3/api-docs',
+    PAYPAL_CONTRACT_INVENTORY_ATTEMPTS: 'unbounded',
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /INVENTORY_ATTEMPTS must be an integer from 1 to 120/);
+});
+
 test('help is concise and does not load the config', () => {
   const result = run(['--help']);
   assert.equal(result.status, 0);

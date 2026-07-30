@@ -40,6 +40,8 @@ runtime endpoints:
 export PAYPAL_CONTRACT_ACTUATOR_URL="https://lower.example/actuator/mappings"
 export PAYPAL_CONTRACT_OPENAPI_URL="https://lower.example/v3/api-docs"
 export INVENTORY_BEARER_TOKEN="..."
+# Optional when the application starts in parallel with the gate (1-120):
+export PAYPAL_CONTRACT_INVENTORY_ATTEMPTS="60"
 node paypal-contract-gate.mjs verify --clean
 ```
 
