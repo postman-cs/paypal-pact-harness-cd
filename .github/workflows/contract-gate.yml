@@ -74,6 +74,7 @@ jobs:
           name: contract-engine-evidence
           path: .contract-reports/
           if-no-files-found: error
+          include-hidden-files: true
 
   spring-lower-environment:
     name: Spring Boot lower-environment proof
@@ -128,6 +129,7 @@ jobs:
           name: spring-lower-environment-evidence
           path: .contract-reports/
           if-no-files-found: error
+          include-hidden-files: true
 
   publish-lower-environment-image:
     name: Publish lower-environment wrapper image
