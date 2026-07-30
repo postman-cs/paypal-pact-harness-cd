@@ -1,4 +1,6 @@
 .demo-tmp/
 node_modules/
+dist/
+.contract-reports/
 *.log
 .DS_Store

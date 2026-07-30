@@ -1,43 +1,75 @@
 {
   "schemaVersion": 1,
   "environment": "lower",
+  "owner": {
+    "team": "PayPal testENV",
+    "primaryContact": "Varun"
+  },
+  "evidenceRetentionDays": 30,
   "applications": [
     {
       "id": "orders-spring-wrapper",
-      "inventory": "http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs"
+      "kind": "provider",
+      "inventorySources": [
+        {
+          "kind": "actuator-mappings",
+          "url": "http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/actuator/mappings",
+          "authoritative": true
+        },
+        {
+          "kind": "generated-openapi",
+          "url": "http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs",
+          "authoritative": false
+        }
+      ]
     },
     {
       "id": "orders-checkout-consumer",
+      "kind": "consumer",
       "contract": "fixtures/paypal/orders-consumer.pact.json"
     },
     {
       "id": "orders-reporting-consumer",
+      "kind": "consumer",
       "contract": "fixtures/paypal/orders-lite-consumer.postman_collection.json"
     }
   ],
   "specifications": [
     {
       "id": "paypal-orders-v2",
-      "path": "fixtures/paypal/checkout_orders_v2.json"
+      "path": "fixtures/paypal/checkout_orders_v2.json",
+      "revision": "2.32",
+      "sha256": "14db0b9e0d7440e38595b823724599edc7ab8b7a2b41ac442463e81b7d477fd6"
     },
     {
       "id": "paypal-catalog-products-v1",
-      "path": "fixtures/paypal/catalogs_products_v1.json"
+      "path": "fixtures/paypal/catalogs_products_v1.json",
+      "revision": "1",
+      "sha256": "32a729f6373cf2f2bf801ac577bb2cd87505959e5de543585cdfe7981b5ffb97"
     }
   ],
   "relationships": [
     {
+      "id": "orders-wrapper-to-orders-v2",
       "application": "orders-spring-wrapper",
       "specification": "paypal-orders-v2",
-      "subset": "config/subsets/orders-demo.json"
+      "subset": "config/subsets/orders-demo.json",
+      "mismatchPolicy": "block",
+      "exceptionRegister": "config/route-exceptions.json"
     },
     {
+      "id": "checkout-consumer-to-orders-v2",
       "application": "orders-checkout-consumer",
-      "specification": "paypal-orders-v2"
+      "specification": "paypal-orders-v2",
+      "subset": "config/subsets/orders-demo.json",
+      "mismatchPolicy": "block"
     },
     {
+      "id": "reporting-consumer-to-orders-v2",
       "application": "orders-reporting-consumer",
-      "specification": "paypal-orders-v2"
+      "specification": "paypal-orders-v2",
+      "subset": "config/subsets/orders-demo.json",
+      "mismatchPolicy": "block"
     }
   ]
 }

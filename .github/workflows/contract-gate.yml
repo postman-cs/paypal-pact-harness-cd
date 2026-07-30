@@ -35,6 +35,8 @@ jobs:
         run: |
           npm run build:bundle
           git diff --exit-code -- tools/pact-harness
+      - name: Package the platform-agnostic CLI release
+        run: npm run package:bundle
       - name: Run consumer and application contract action
         id: contract
         uses: ./
@@ -45,6 +47,10 @@ jobs:
           provider-name: paypal-orders
           application-routes: fixtures/paypal/orders-spring-routes.json
           spec-subset: config/subsets/orders-demo.json
+          contract-policy: config/contract-policy.json
+          route-exceptions: config/route-exceptions.json
+          environment: lower
+          complete-results: "true"
           route-policy: block
       - name: Prove consumer drift and rogue endpoints fail closed
         shell: bash
@@ -52,17 +58,23 @@ jobs:
           set -euo pipefail
           if node tools/pact-harness/pact-harness.mjs can-i-deploy \
             --oas fixtures/paypal/checkout_orders_v2.drift.json \
-            --pact "${{ steps.contract.outputs.consumer-pact }}"; then
+            --pact "${{ steps.contract.outputs.consumer-pact }}" \
+            --policy config/contract-policy.json; then
             echo "::error::consumer-breaking provider drift was not blocked"
             exit 1
           fi
-          node scripts/resolve-postman-cs.mjs \
-            --artifact compare-routes \
-            --out "${RUNNER_TEMP}/compare-routes.mjs"
-          if node "${RUNNER_TEMP}/compare-routes.mjs" \
+          if node tools/pact-harness/pact-harness.mjs oas-diff \
+            --baseline fixtures/paypal/checkout_orders_v2.json \
+            --candidate fixtures/paypal/checkout_orders_v2.drift.json \
+            --subset config/subsets/orders-demo.json; then
+            echo "::error::selected-surface breaking OAS drift was not blocked"
+            exit 1
+          fi
+          if node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
             --spec fixtures/paypal/checkout_orders_v2.json \
             --routes fixtures/paypal/orders-spring-routes.rogue.json \
             --subset config/subsets/orders-demo.json \
+            --exceptions config/route-exceptions.json \
             --policy block; then
             echo "::error::rogue application endpoint was not blocked"
             exit 1
@@ -72,9 +84,12 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: contract-engine-evidence
-          path: .contract-reports/
+          path: |
+            .contract-reports/
+            dist/
           if-no-files-found: error
           include-hidden-files: true
+          retention-days: 30
 
   spring-lower-environment:
     name: Spring Boot lower-environment proof
@@ -89,10 +104,16 @@ jobs:
           java-version: "21"
           cache: maven
           cache-dependency-path: demo/orders-spring/pom.xml
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
       - name: Test and package the Orders Spring Boot wrapper
         run: mvn -B -f demo/orders-spring/pom.xml verify
-      - name: Start the lower-environment wrapper and export runtime routes
+      - name: Start the lower-environment wrapper and export both route inventories
         shell: bash
+        env:
+          CONTRACT_DEMO_TOKEN: github-lower-contract-token
         run: |
           set -euo pipefail
           mkdir -p .contract-reports
@@ -104,18 +125,48 @@ jobs:
             sleep 2
           done
           curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null
-          curl --fail --silent http://127.0.0.1:8080/v3/api-docs \
-            --output .contract-reports/runtime-openapi.json
-      - name: Gate the running Spring Boot application
+          node scripts/collect-route-inventories.mjs \
+            --actuator-url http://127.0.0.1:8080/actuator/mappings \
+            --openapi-url http://127.0.0.1:8080/v3/api-docs \
+            --out-dir .contract-reports/inventory
+      - name: Gate authoritative Actuator mappings
         uses: ./
         with:
           provider-oas: fixtures/paypal/checkout_orders_v2.json
           consumer-contract: fixtures/paypal/orders-consumer.pact.json
           consumer-format: pact
-          application-routes: .contract-reports/runtime-openapi.json
+          application-routes: .contract-reports/inventory/actuator-mappings.json
           spec-subset: config/subsets/orders-demo.json
+          contract-policy: config/contract-policy.json
+          route-exceptions: config/route-exceptions.json
+          environment: lower
+          complete-results: "true"
           route-policy: block
           report-directory: .contract-reports/spring
+      - name: Cross-check generated OpenAPI inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
+            --spec fixtures/paypal/checkout_orders_v2.json \
+            --routes .contract-reports/inventory/generated-openapi.json \
+            --subset config/subsets/orders-demo.json \
+            --exceptions config/route-exceptions.json \
+            --policy block \
+            --json-out .contract-reports/generated-openapi-route-contract.json \
+            --junit-out .contract-reports/generated-openapi-route-contract.xml
+      - name: Install the exact Postman CLI release
+        run: npm install --global postman-cli@1.44.0
+      - name: Exercise positive and negative cases with Postman CLI
+        shell: bash
+        env:
+          CONTRACT_DEMO_TOKEN: github-lower-contract-token
+        run: |
+          set -euo pipefail
+          node scripts/postman/run-lower-collection.mjs \
+            --collection fixtures/paypal/orders-lower.postman_collection.json \
+            --base-url http://127.0.0.1:8080 \
+            --out-dir .contract-reports/postman
       - name: Stop the lower-environment wrapper
         if: ${{ always() }}
         shell: bash
@@ -130,6 +181,7 @@ jobs:
           path: .contract-reports/
           if-no-files-found: error
           include-hidden-files: true
+          retention-days: 30
 
   publish-lower-environment-image:
     name: Publish lower-environment wrapper image

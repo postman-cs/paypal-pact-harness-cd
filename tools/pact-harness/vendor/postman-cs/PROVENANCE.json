@@ -1,0 +1,6 @@
+{
+  "repository": "postman-cs/paypal-harness-postman-stages",
+  "commit": "b7d6a13144ef250efab5db65dc9358daa802429e",
+  "path": "scripts/compare-routes.mjs",
+  "sha256": "4992e1879455144f3183448ee79cf70f3189864edf8101773cb378c3689a99c7"
+}

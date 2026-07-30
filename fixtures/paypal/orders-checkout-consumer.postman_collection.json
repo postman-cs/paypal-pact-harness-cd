@@ -33,6 +33,21 @@
           "code": 200,
           "header": [{ "key": "Content-Type", "value": "application/json" }],
           "body": "{\n  \"id\": \"5O190127TN364715T\",\n  \"status\": \"COMPLETED\",\n  \"intent\": \"CAPTURE\",\n  \"create_time\": \"2026-01-01T00:00:00Z\",\n  \"purchase_units\": [\n    { \"reference_id\": \"default\", \"amount\": { \"currency_code\": \"USD\", \"value\": \"100.00\" } }\n  ]\n}"
+        },
+        {
+          "name": "404 resource not found",
+          "originalRequest": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api-m.sandbox.paypal.com/v2/checkout/orders/missing-order",
+              "path": ["v2", "checkout", "orders", "missing-order"]
+            }
+          },
+          "status": "Not Found",
+          "code": 404,
+          "header": [{ "key": "Content-Type", "value": "application/json" }],
+          "body": "{\n  \"name\": \"RESOURCE_NOT_FOUND\",\n  \"debug_id\": \"contract-demo-debug-id\",\n  \"message\": \"The specified resource does not exist.\"\n}"
         }
       ]
     }

@@ -2,7 +2,7 @@
 # collection + provider OAS from Postman (CLI-first), turns the collection into a pact,
 # records the verification into a SHARED contracts ledger repo, and gates on the fleet
 # can-i-deploy. Still no broker/server: the ledger is a git repo, the engine is the
-# vendored bundle (tools/pact-harness). Needs two secrets (below). See harness/IMPORT.md.
+# vendored bundle (tools/pact-harness). See harness/IMPORT.md.
 pipeline:
   name: Contract gate — real consumer (Harness)
   identifier: contract_gate_real
@@ -28,7 +28,7 @@ pipeline:
       value: <+input>          # the provider OAS version live in TARGET_ENV
     - name: TARGET_ENV
       type: String
-      value: production
+      value: lower
     - name: LEDGER_REPO
       type: String
       value: <+input>          # e.g. github.com/danielshively-source/paypal-contracts
@@ -48,11 +48,14 @@ pipeline:
                   identifier: pull_and_pact
                   type: Run
                   spec:
-                    image: ghcr.io/postman-cs/postman-tools:node24
+                    image: node:24-bookworm-slim
                     shell: Sh
                     envVariables:
-                      POSTMAN_API_KEY: <+secrets.getValue("postman_service_pmak")>
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_api_key")>
                     command: |
+                      set -eu
+                      npm install --global postman-cli@1.44.0
+                      postman login --with-api-key "$POSTMAN_API_KEY"
                       node tools/pact-harness/scripts/postman/pull-artifacts.mjs \
                         --collection-uid "<+pipeline.variables.CONSUMER_COLLECTION_UID>" \
                         --spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" --out-dir .local
@@ -60,6 +63,22 @@ pipeline:
                         --collection .local/collection.json \
                         --provider "<+pipeline.variables.PROVIDER_NAME>" \
                         --out .local/consumer.pact.json
+                      node tools/pact-harness/contract-gate.mjs \
+                        --oas .local/provider-oas.yaml \
+                        --pact .local/consumer.pact.json \
+                        --subset config/subsets/orders-demo.json \
+                        --policy config/contract-policy.json \
+                        --exceptions config/route-exceptions.json \
+                        --environment lower \
+                        --report-dir .contract-reports \
+                        --complete-results
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/contract-gate-summary.xml
+                          - .contract-reports/oas-audit.xml
+                          - .contract-reports/consumer-bdc.xml
               - step:
                   name: Record verification into the shared ledger (commit + push)
                   identifier: record_verification
@@ -68,11 +87,12 @@ pipeline:
                     image: node:20
                     shell: Sh
                     envVariables:
-                      LEDGER_GIT_TOKEN: <+secrets.getValue("ledger_git_token")>
+                      LEDGER_GIT_TOKEN: <+secrets.getValue("postman_cs_github_pat")>
                     command: |
                       git clone --depth 1 "https://x-access-token:${LEDGER_GIT_TOKEN}@<+pipeline.variables.LEDGER_REPO>" .ledger
                       node tools/pact-harness/pact-harness.mjs record-verification \
                         --ledger .ledger --oas .local/provider-oas.yaml --pact .local/consumer.pact.json \
+                        --policy config/contract-policy.json \
                         --consumer-version "<+codebase.commitSha>" \
                         --provider-version "<+pipeline.variables.PROVIDER_VERSION>"
                       git -C .ledger config user.email "ci@paypal-contracts"

@@ -17,6 +17,9 @@ import { serialize } from './lib/pact.mjs';
 import { postmanToPact } from './postman-to-pact.mjs';
 import { oasToPact } from './oas-to-pact.mjs';
 import { bdcVerify, canIDeploy } from './bdc-verify.mjs';
+import { auditOas } from './oas-audit.mjs';
+import { diffOas } from './oas-diff.mjs';
+import { validateRouteExceptions } from './route-exceptions.mjs';
 import { providerVerify, providerContract } from './provider-verify.mjs';
 import { canIDeployLedger, buildPactRecord, buildProviderRecord, buildVerificationRecord, buildDeploymentRecord } from './lib/ledger.mjs';
 import { readLedger, writePactRecord, writeProviderRecord, writeVerificationRecord, writeDeploymentRecord } from './ledger-store.mjs';
@@ -106,8 +109,13 @@ function reportResult(result, args, { asGate }) {
     writeFileSync(args.junit, toJUnit(result));
     console.log(`wrote JUnit -> ${args.junit}`);
   }
+  const jsonResult = asGate ? { ...canIDeploy(result), result } : result;
+  if (typeof args['json-out'] === 'string') {
+    writeFileSync(args['json-out'], JSON.stringify(jsonResult, null, 2) + '\n');
+    console.log(`wrote JSON -> ${args['json-out']}`);
+  }
   if (args.json === true) {
-    process.stdout.write(JSON.stringify(asGate ? canIDeploy(result) : result, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
   } else {
     console.log(`${result.consumer} -> ${result.provider}: ${result.summary.passed}/${result.summary.total} interactions verified`);
     for (const i of result.interactions) {
@@ -122,8 +130,36 @@ function reportResult(result, args, { asGate }) {
 
 // Static BDC: consumer pact x provider OAS (no provider run).
 function cmdBdcVerify(args, { asGate }) {
-  const result = bdcVerify(loadDoc(need(args, 'oas')), loadDoc(need(args, 'pact')));
+  const policyDoc = typeof args.policy === 'string' ? loadDoc(args.policy) : {};
+  const result = bdcVerify(
+    loadDoc(need(args, 'oas')),
+    loadDoc(need(args, 'pact')),
+    policyDoc.consumer ?? policyDoc,
+  );
   reportResult(result, args, { asGate });
+}
+
+function cmdOasAudit(args) {
+  const policyDoc = typeof args.policy === 'string' ? loadDoc(args.policy) : {};
+  const result = auditOas(loadDoc(need(args, 'oas')), {
+    subset: typeof args.subset === 'string' ? loadDoc(args.subset) : null,
+    policy: policyDoc.oasAudit ?? policyDoc,
+  });
+  reportResult(result, args, { asGate: false });
+}
+
+function cmdOasDiff(args) {
+  const result = diffOas(loadDoc(need(args, 'baseline')), loadDoc(need(args, 'candidate')), {
+    subset: typeof args.subset === 'string' ? loadDoc(args.subset) : null,
+  });
+  reportResult(result, args, { asGate: false });
+}
+
+function cmdValidateExceptions(args) {
+  const result = validateRouteExceptions(loadDoc(need(args, 'file')), {
+    environment: need(args, 'environment'),
+  });
+  reportResult(result, args, { asGate: false });
 }
 
 // can-i-deploy: ledger mode (--ledger, git-backed cross-fleet), else single-pair
@@ -180,9 +216,10 @@ function cmdRecordVerification(args) {
   const dir = need(args, 'ledger');
   const oas = loadDoc(need(args, 'oas'));
   const pact = loadDoc(need(args, 'pact'));
+  const policyDoc = typeof args.policy === 'string' ? loadDoc(args.policy) : {};
   const consumerVersion = need(args, 'consumer-version');
   const providerVersion = need(args, 'provider-version');
-  const result = bdcVerify(oas, pact);
+  const result = bdcVerify(oas, pact, policyDoc.consumer ?? policyDoc);
   const pc = providerContract(oas, { name: pact.provider.name });
   const at = new Date().toISOString();
 
@@ -218,11 +255,14 @@ switch (cmd) {
   case 'postman-to-pact': cmdPostmanToPact(args); break;
   case 'oas-to-pact': cmdOasToPact(args); break;
   case 'bdc-verify': cmdBdcVerify(args, { asGate: false }); break;
+  case 'oas-audit': cmdOasAudit(args); break;
+  case 'oas-diff': cmdOasDiff(args); break;
+  case 'validate-exceptions': cmdValidateExceptions(args); break;
   case 'provider-verify': cmdProviderVerify(args); break;
   case 'record-verification': cmdRecordVerification(args); break;
   case 'record-deployment': cmdRecordDeployment(args); break;
   case 'can-i-deploy': cmdCanIDeploy(args); break;
   default:
-    console.error('usage: pact-harness <postman-to-pact|oas-to-pact|bdc-verify|provider-verify|record-verification|record-deployment|can-i-deploy> [options]');
+    console.error('usage: pact-harness <postman-to-pact|oas-to-pact|oas-audit|oas-diff|validate-exceptions|bdc-verify|provider-verify|record-verification|record-deployment|can-i-deploy> [options]');
     process.exit(2);
 }

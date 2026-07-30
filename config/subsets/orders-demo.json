@@ -1,4 +1,11 @@
 {
+  "schemaVersion": 1,
+  "id": "paypal-orders-v2-demo-surface",
+  "description": "All nine operations under the PayPal Orders v2 resource prefix.",
+  "owner": {
+    "team": "PayPal testENV",
+    "primaryContact": "Varun"
+  },
   "include": [
     {
       "pathPrefix": "/v2/checkout/orders"

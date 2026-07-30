@@ -25,13 +25,26 @@ inputs:
     required: false
     default: ""
   spec-subset:
-    description: Optional repository-relative include/exclude selector applied to both route sets.
-    required: false
-    default: ""
+    description: Repository-relative include/exclude selector applied to contract and route checks.
+    required: true
+  contract-policy:
+    description: Repository-relative consumer, schema, security, negative-case, and example policy.
+    required: true
   route-exceptions:
-    description: Optional repository-relative approved mismatch register.
+    description: Repository-relative governed and expiring mismatch exception register.
+    required: true
+  baseline-oas:
+    description: Optional previous provider OAS for selected-surface breaking-change analysis.
     required: false
     default: ""
+  environment:
+    description: Environment name used to scope route exceptions.
+    required: false
+    default: lower
+  complete-results:
+    description: Run every module and emit an aggregate verdict instead of bailing after the first failure.
+    required: false
+    default: "true"
   strip-prefix:
     description: Optional application route prefix removed before comparison.
     required: false
@@ -58,6 +71,12 @@ outputs:
   route-junit:
     description: Bidirectional route-comparison JUnit report, when application-routes is supplied.
     value: ${{ steps.paths.outputs.route-junit }}
+  gate-json:
+    description: Aggregate complete-results JSON report.
+    value: ${{ steps.paths.outputs.gate-json }}
+  gate-junit:
+    description: Aggregate complete-results JUnit report.
+    value: ${{ steps.paths.outputs.gate-junit }}
 
 runs:
   using: composite
@@ -71,8 +90,11 @@ runs:
         CONSUMER_FORMAT: ${{ inputs.consumer-format }}
         APPLICATION_ROUTES: ${{ inputs.application-routes }}
         SPEC_SUBSET: ${{ inputs.spec-subset }}
+        CONTRACT_POLICY: ${{ inputs.contract-policy }}
         ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
+        BASELINE_OAS: ${{ inputs.baseline-oas }}
         ROUTE_POLICY: ${{ inputs.route-policy }}
+        COMPLETE_RESULTS: ${{ inputs.complete-results }}
         REPORT_DIRECTORY: ${{ inputs.report-directory }}
       run: |
         set -euo pipefail
@@ -82,15 +104,22 @@ runs:
         case "$ROUTE_POLICY" in block|warn) ;; *)
           echo "::error::route-policy must be block or warn"; exit 2 ;;
         esac
+        case "$COMPLETE_RESULTS" in true|false) ;; *)
+          echo "::error::complete-results must be true or false"; exit 2 ;;
+        esac
         for path in "$PROVIDER_OAS" "$CONSUMER_CONTRACT" "$APPLICATION_ROUTES" \
-          "$SPEC_SUBSET" "$ROUTE_EXCEPTIONS" "$REPORT_DIRECTORY"; do
+          "$SPEC_SUBSET" "$CONTRACT_POLICY" "$ROUTE_EXCEPTIONS" "$BASELINE_OAS" \
+          "$REPORT_DIRECTORY"; do
           case "$path" in
             /*|..|../*|*/../*|*/..) echo "::error::paths must be safe and repository-relative"; exit 2 ;;
           esac
         done
         test -f "$PROVIDER_OAS"
         test -f "$CONSUMER_CONTRACT"
-        for optional in "$APPLICATION_ROUTES" "$SPEC_SUBSET" "$ROUTE_EXCEPTIONS"; do
+        test -f "$SPEC_SUBSET"
+        test -f "$CONTRACT_POLICY"
+        test -f "$ROUTE_EXCEPTIONS"
+        for optional in "$APPLICATION_ROUTES" "$BASELINE_OAS"; do
           test -z "$optional" || test -f "$optional"
         done
         mkdir -p "$REPORT_DIRECTORY"
@@ -123,53 +152,56 @@ runs:
         echo "bdc-junit=$REPORT_DIRECTORY/consumer-bdc.xml" >> "$GITHUB_OUTPUT"
         echo "route-json=$REPORT_DIRECTORY/route-contract.json" >> "$GITHUB_OUTPUT"
         echo "route-junit=$REPORT_DIRECTORY/route-contract.xml" >> "$GITHUB_OUTPUT"
+        echo "gate-json=$REPORT_DIRECTORY/contract-gate-summary.json" >> "$GITHUB_OUTPUT"
+        echo "gate-junit=$REPORT_DIRECTORY/contract-gate-summary.xml" >> "$GITHUB_OUTPUT"
 
-    - id: bdc
-      name: Verify consumer expectations against the provider OAS
+    - id: provenance
+      name: Verify the bundled Postman-CS dependency
+      shell: bash
+      run: |
+        set -euo pipefail
+        node --input-type=module <<'NODE'
+        import { createHash } from 'node:crypto';
+        import { readFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const root = process.env.GITHUB_ACTION_PATH;
+        const lock = JSON.parse(readFileSync(join(root, 'postman-cs.lock.json')));
+        const content = readFileSync(join(root, 'tools/pact-harness/vendor/postman-cs/compare-routes.mjs'));
+        const actual = createHash('sha256').update(content).digest('hex');
+        const expected = lock.artifacts['compare-routes'].sha256;
+        if (actual !== expected) throw new Error(`Postman-CS comparator digest mismatch: ${actual}`);
+        console.log(`verified postman-cs comparator sha256=${actual}`);
+        NODE
+
+    - id: gate
+      name: Run the complete modular contract gate
       shell: bash
       env:
         PROVIDER_OAS: ${{ inputs.provider-oas }}
+        BASELINE_OAS: ${{ inputs.baseline-oas }}
         PACT: ${{ steps.paths.outputs.consumer-pact }}
-        BDC_JUNIT: ${{ steps.paths.outputs.bdc-junit }}
-      run: |
-        set -euo pipefail
-        node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" can-i-deploy \
-          --oas "$PROVIDER_OAS" --pact "$PACT" --junit "$BDC_JUNIT"
-
-    - id: dependency
-      if: ${{ inputs.application-routes != '' }}
-      name: Resolve the pinned Postman-CS route comparator
-      shell: bash
-      run: |
-        set -euo pipefail
-        mkdir -p "${RUNNER_TEMP:-/tmp}/paypal-contract-gate"
-        node "$GITHUB_ACTION_PATH/scripts/resolve-postman-cs.mjs" \
-          --lock "$GITHUB_ACTION_PATH/postman-cs.lock.json" \
-          --artifact compare-routes \
-          --out "${RUNNER_TEMP:-/tmp}/paypal-contract-gate/compare-routes.mjs"
-
-    - id: routes
-      if: ${{ inputs.application-routes != '' }}
-      name: Compare selected spec routes to application routes bidirectionally
-      shell: bash
-      env:
-        PROVIDER_OAS: ${{ inputs.provider-oas }}
         APPLICATION_ROUTES: ${{ inputs.application-routes }}
         SPEC_SUBSET: ${{ inputs.spec-subset }}
+        CONTRACT_POLICY: ${{ inputs.contract-policy }}
         ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
         STRIP_PREFIX: ${{ inputs.strip-prefix }}
         ROUTE_POLICY: ${{ inputs.route-policy }}
-        ROUTE_JSON: ${{ steps.paths.outputs.route-json }}
-        ROUTE_JUNIT: ${{ steps.paths.outputs.route-junit }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPLETE_RESULTS: ${{ inputs.complete-results }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
       run: |
         set -euo pipefail
         set -- \
-          --spec "$PROVIDER_OAS" \
-          --routes "$APPLICATION_ROUTES" \
-          --policy "$ROUTE_POLICY" \
-          --json-out "$ROUTE_JSON" \
-          --junit-out "$ROUTE_JUNIT"
-        test -z "$SPEC_SUBSET" || set -- "$@" --subset "$SPEC_SUBSET"
-        test -z "$ROUTE_EXCEPTIONS" || set -- "$@" --exceptions "$ROUTE_EXCEPTIONS"
+          --oas "$PROVIDER_OAS" \
+          --pact "$PACT" \
+          --subset "$SPEC_SUBSET" \
+          --policy "$CONTRACT_POLICY" \
+          --exceptions "$ROUTE_EXCEPTIONS" \
+          --environment "$ENVIRONMENT" \
+          --route-policy "$ROUTE_POLICY" \
+          --report-dir "$REPORT_DIRECTORY"
+        test -z "$BASELINE_OAS" || set -- "$@" --baseline "$BASELINE_OAS"
+        test -z "$APPLICATION_ROUTES" || set -- "$@" --routes "$APPLICATION_ROUTES"
         test -z "$STRIP_PREFIX" || set -- "$@" --strip-prefix "$STRIP_PREFIX"
-        node "${RUNNER_TEMP:-/tmp}/paypal-contract-gate/compare-routes.mjs" "$@"
+        test "$COMPLETE_RESULTS" != true || set -- "$@" --complete-results
+        node "$GITHUB_ACTION_PATH/scripts/run-contract-gate.mjs" "$@"

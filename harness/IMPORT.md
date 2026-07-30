@@ -3,8 +3,8 @@
 The consumer contract capability is available as one modular Kubernetes stage and
 three runnable pipeline shapes. No broker or server is required for the phase-0
 gate: the consumer engine is the vendored bundle (`tools/pact-harness`) and the
-route comparator is resolved from the real Postman-CS repository with a full commit
-and SHA-256 lock.
+route comparator is vendored from the real Postman-CS repository with a full commit
+and SHA-256 lock. The build verifies provenance; pipeline runtime stays offline.
 
 ## A. Drop-in stage for an existing pipeline
 
@@ -14,10 +14,12 @@ stage. Supply:
 - the repository codebase connector;
 - the KubernetesDirect connector and lower-environment namespace;
 - a registry connector for the Node runner image;
-- the lower-environment application and route-inventory URLs.
+- the lower-environment application, Actuator, and generated OpenAPI URLs;
+- project secrets `paypal_contract_demo_token` and `paypal_postman_api_key`.
 
 The first validation is locked to `environment_name=lower`. The stage publishes
-consumer BDC and bidirectional route-comparison JUnit.
+consumer/audit/route/Postman JUnit, writes JSON for every module, and seals an
+evidence checksum manifest.
 
 ## B. Lower-environment pipeline
 
@@ -26,18 +28,19 @@ It targets the Orders Spring wrapper at:
 
 `http://orders-spring.paypal-contract-lower.svc.cluster.local:8080`
 
-Deploy `k8s/orders-spring-lower.yaml` first, using the immutable image produced by
-the GitHub workflow. Do not point the first run at production.
+Create `orders-spring-contract-auth` from the same Harness secret, then deploy
+`k8s/orders-spring-lower.yaml` using the immutable image produced by GitHub. Do not
+point the first run at production.
 
 ## C. Self-test pipeline
 
 `contract-gate.self-test.pipeline.yaml` is the zero-secret Harness Cloud proof.
 Run it when the Kubernetes delegate is not yet available. It proves:
 
-- the current Orders consumer contract passes;
-- the selected application/spec routes match;
-- consumer-breaking drift is blocked;
-- a deliberately injected rogue endpoint is blocked.
+- the OAS security, negative response, and example audit passes;
+- the current Orders consumer contract and all nine selected routes pass;
+- governed exceptions validate;
+- consumer-breaking BDC drift, schema diff, and a rogue endpoint are blocked.
 
 This self-test is execution evidence for the stage logic, but it does not replace
 the required lower-environment Kubernetes run.
@@ -57,28 +60,36 @@ Good for a first run / demo.
    - fleet `can-i-deploy` over the committed ledger (→ YES),
    - fail-closed proof (a drift release → the step goes RED on purpose if it *isn't* blocked).
 
-## E. Real-consumer Postman pipeline
+## E. Future real-consumer Postman pipeline
 
 Pulls the consumer collection + provider OAS from Postman, records into a **shared**
 contracts repo, and gates on the fleet.
 
-Secrets (project scope):
+Secrets already used by this POC (project scope):
 | Secret | Used for |
 | --- | --- |
-| `postman_service_pmak` | Postman CLI pull (collection + Spec Hub) |
-| `ledger_git_token` | clone + push the shared contracts repo (write to it only) |
+| `paypal_postman_api_key` | Postman CLI login, collection + Spec Hub access |
+| `postman_cs_github_pat` | clone + push the optional shared contracts repo |
 
 Pipeline inputs when you run: codebase connector (this repo), `CONSUMER_COLLECTION_UID`,
 `PROVIDER_SPEC_ID`, `PROVIDER_VERSION` (the version live in the target env), `LEDGER_REPO`
 (e.g. `github.com/danielshively-source/paypal-contracts`).
 
-The gate is read-only w.r.t. your app source — it records only to the contracts repo and
-never promotes/deploys. Recording a *deployment* runs from your promotion pipeline, after
-a real deploy (one-liner at the bottom of the pipeline file).
+The gate is read-only with respect to app source and never promotes/deploys. The
+optional ledger write targets only a dedicated contracts repository. Production
+service/spec details remain outside this Orders demo.
 
 ## Parity with GitHub Actions
 
 This repository's `.github/workflows/contract-gate.yml` runs the same bundle,
-same locked Postman-CS comparator, same Orders subset, and same fail-closed proofs.
-The GitHub job also starts the Spring Boot wrapper and gates its generated runtime
-OpenAPI inventory.
+same locked Postman-CS comparator, policy, exceptions, Orders subset, and fail-closed
+proofs. GitHub also starts Spring Boot, gates authoritative Actuator mappings,
+cross-checks generated OpenAPI, and runs Postman CLI positive/negative requests.
+
+## Evidence retention
+
+GitHub stores the complete JUnit/JSON evidence and portable CLI artifact for 30
+days. Harness renders JUnit and retains execution logs under the account policy.
+This account does not have a Harness Artifact Registry licence, so a native
+`HarUpload` step is intentionally not included. Add an S3/GCS/JFrog upload step if
+PayPal requires the Harness execution itself to persist the JSON files externally.

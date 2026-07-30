@@ -3,6 +3,7 @@ kind: Namespace
 metadata:
   name: paypal-contract-lower
   labels:
+    kubernetes.io/metadata.name: paypal-contract-lower
     app.kubernetes.io/part-of: paypal-contract-demo
     paypal.com/environment: lower
 ---
@@ -15,6 +16,12 @@ metadata:
     app.kubernetes.io/name: orders-spring
 spec:
   replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: orders-spring
@@ -25,13 +32,27 @@ spec:
         paypal.com/environment: lower
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: tmp
           emptyDir: {}
       containers:
         - name: orders-spring
-          image: ghcr.io/danielshively-source/paypal-pact-harness-cd/orders-spring-wrapper:main
+          image: ghcr.io/danielshively-source/paypal-pact-harness-cd/orders-spring-wrapper@sha256:921345d0e4792945ea10b1cce5b34a000a9346bdab383edf0bc30b04b20629ac
           imagePullPolicy: Always
+          env:
+            - name: CONTRACT_DEMO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: orders-spring-contract-auth
+                  key: token
           ports:
             - name: http
               containerPort: 8080
@@ -71,9 +92,34 @@ metadata:
   name: orders-spring
   namespace: paypal-contract-lower
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: orders-spring
   ports:
     - name: http
       port: 8080
       targetPort: http
+---
+# The application is intentionally private. Harness CI pods in the same lower
+# namespace may call it; ingress from other namespaces and all app egress are denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orders-spring-private
+  namespace: paypal-contract-lower
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: orders-spring
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: paypal-contract-lower
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress: []

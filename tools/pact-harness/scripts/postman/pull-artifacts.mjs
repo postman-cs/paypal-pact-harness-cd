@@ -35,6 +35,30 @@ function run(cmd, args) {
   return r.stdout;
 }
 
+async function fetchJson(url, apiKey, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        headers: { 'X-Api-Key': apiKey },
+        signal: controller.signal,
+        redirect: 'error',
+      });
+      if (response.ok) return response.json();
+      lastError = new Error(`Postman API returned HTTP ${response.status}`);
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timer);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** (attempt - 1))));
+  }
+  throw new Error(`Postman collection export failed: ${lastError?.message ?? 'unknown error'}`);
+}
+
 const outDir = arg('out-dir') || '.local';
 const collectionUid = arg('collection-uid');
 const specId = arg('spec-id');
@@ -52,9 +76,9 @@ if (specId) {
 if (collectionUid) {
   const key = process.env.POSTMAN_API_KEY;
   if (!key) { console.error('[pull] POSTMAN_API_KEY required to export the collection'); process.exit(2); }
-  const body = run('curl', ['-sf', '-H', `X-Api-Key: ${key}`,
-    `https://api.getpostman.com/collections/${collectionUid}`]);
-  const collection = JSON.parse(body).collection;
+  const body = await fetchJson(`https://api.getpostman.com/collections/${encodeURIComponent(collectionUid)}`, key);
+  const collection = body.collection;
+  if (!collection || typeof collection !== 'object') throw new Error('Postman API response did not contain a collection');
   const collectionPath = join(outDir, 'collection.json');
   writeFileSync(collectionPath, JSON.stringify(collection, null, 2) + '\n');
   console.log(`[pull] consumer collection -> ${collectionPath}`);

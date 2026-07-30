@@ -97,6 +97,52 @@
           }
         }
       }
+    },
+    {
+      "description": "Show order details (404)",
+      "request": {
+        "method": "GET",
+        "path": "/v2/checkout/orders/missing-order",
+        "headers": {
+          "Accept": "application/json"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "RESOURCE_NOT_FOUND",
+          "debug_id": "contract-demo-debug-id",
+          "message": "The specified resource does not exist."
+        },
+        "matchingRules": {
+          "body": {
+            "$.debug_id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.message": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.name": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "metadata": {

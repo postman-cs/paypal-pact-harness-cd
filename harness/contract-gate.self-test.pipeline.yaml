@@ -1,6 +1,5 @@
-# Zero-secret Harness proof. This runs the exact vendored consumer engine and
-# the exact digest-locked Postman-CS route comparator against committed Orders
-# evidence. It is safe to run before the Kubernetes delegate is available.
+# Zero-secret Harness Cloud proof. This runs the same complete-results bundle and
+# digest-locked Postman-CS comparator that the KubernetesDirect stage uses.
 pipeline:
   name: PayPal contract gate - self test
   identifier: paypal_contract_gate_self_test
@@ -28,46 +27,31 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: Consumer-authored BDC gate
-                  identifier: consumer_bdc_gate
+                  name: Complete consumer contract gate
+                  identifier: complete_consumer_contract_gate
                   spec:
                     image: node:24
                     shell: Sh
                     command: |
                       set -eu
-                      mkdir -p .contract-reports
-                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                      node tools/pact-harness/contract-gate.mjs \
                         --oas fixtures/paypal/checkout_orders_v2.json \
                         --pact fixtures/paypal/orders-consumer.pact.json \
-                        --junit .contract-reports/consumer-bdc.xml
-                    reports:
-                      type: JUnit
-                      spec:
-                        paths:
-                          - .contract-reports/consumer-bdc.xml
-              - step:
-                  type: Run
-                  name: Route parity and rogue detection
-                  identifier: route_parity_and_rogue_detection
-                  spec:
-                    image: node:24
-                    shell: Sh
-                    command: |
-                      set -eu
-                      node scripts/resolve-postman-cs.mjs \
-                        --artifact compare-routes \
-                        --out .contract-reports/compare-routes.mjs
-                      node .contract-reports/compare-routes.mjs \
-                        --spec fixtures/paypal/checkout_orders_v2.json \
                         --routes fixtures/paypal/orders-spring-routes.json \
                         --subset config/subsets/orders-demo.json \
-                        --policy block \
-                        --json-out .contract-reports/route-contract.json \
-                        --junit-out .contract-reports/route-contract.xml
+                        --policy config/contract-policy.json \
+                        --exceptions config/route-exceptions.json \
+                        --environment lower \
+                        --route-policy block \
+                        --report-dir .contract-reports \
+                        --complete-results
                     reports:
                       type: JUnit
                       spec:
                         paths:
+                          - .contract-reports/contract-gate-summary.xml
+                          - .contract-reports/oas-audit.xml
+                          - .contract-reports/consumer-bdc.xml
                           - .contract-reports/route-contract.xml
               - step:
                   type: Run
@@ -80,16 +64,55 @@ pipeline:
                       set -eu
                       if node tools/pact-harness/pact-harness.mjs can-i-deploy \
                         --oas fixtures/paypal/checkout_orders_v2.drift.json \
-                        --pact fixtures/paypal/orders-consumer.pact.json; then
+                        --pact fixtures/paypal/orders-consumer.pact.json \
+                        --policy config/contract-policy.json; then
                         echo 'consumer-breaking OAS drift was not blocked' >&2
                         exit 1
                       fi
-                      if node .contract-reports/compare-routes.mjs \
+                      if node tools/pact-harness/pact-harness.mjs oas-diff \
+                        --baseline fixtures/paypal/checkout_orders_v2.json \
+                        --candidate fixtures/paypal/checkout_orders_v2.drift.json \
+                        --subset config/subsets/orders-demo.json; then
+                        echo 'selected-surface breaking OAS drift was not blocked' >&2
+                        exit 1
+                      fi
+                      if node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
                         --spec fixtures/paypal/checkout_orders_v2.json \
                         --routes fixtures/paypal/orders-spring-routes.rogue.json \
                         --subset config/subsets/orders-demo.json \
+                        --exceptions config/route-exceptions.json \
                         --policy block; then
                         echo 'rogue endpoint was not blocked' >&2
                         exit 1
                       fi
-                      echo 'consumer drift and rogue endpoint both blocked'
+                      echo 'consumer drift, selected OAS drift, and rogue endpoint all blocked'
+              - step:
+                  type: Run
+                  name: Seal JSON evidence
+                  identifier: seal_json_evidence
+                  spec:
+                    image: node:24
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node --input-type=module <<'NODE'
+                      import { createHash } from 'node:crypto';
+                      import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+                      const files = readdirSync('.contract-reports', { recursive: true })
+                        .filter((file) => String(file).endsWith('.json'))
+                        .map(String)
+                        .sort();
+                      const evidence = files.map((file) => {
+                        const content = readFileSync(`.contract-reports/${file}`);
+                        return {
+                          file,
+                          bytes: content.length,
+                          sha256: createHash('sha256').update(content).digest('hex'),
+                        };
+                      });
+                      writeFileSync(
+                        '.contract-reports/evidence-manifest.json',
+                        `${JSON.stringify({ schemaVersion: 1, files: evidence }, null, 2)}\n`,
+                      );
+                      console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
+                      NODE

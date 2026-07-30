@@ -1,6 +1,5 @@
-# First customer validation: the modular consumer contract stage runs on
-# KubernetesDirect against the Orders Spring Boot wrapper in the lower
-# environment. Runtime connector and registry connector remain explicit inputs.
+# First customer validation: this modular CI stage runs on KubernetesDirect
+# against the authenticated Orders Spring Boot wrapper in the lower environment.
 pipeline:
   name: PayPal contract gate - lower
   identifier: paypal_contract_gate_lower
@@ -11,6 +10,10 @@ pipeline:
       codebase:
         connectorRef: <+input>
         build: <+input>
+  variables:
+    - name: POSTMAN_COLLECTION_ID
+      type: String
+      value: <+input>.default("")
   stages:
     - stage:
         name: Contract - Consumer and route gate
@@ -22,10 +25,13 @@ pipeline:
             value: lower
           - name: app_base_url
             type: String
-            value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080)
-          - name: inventory_url
+            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080
+          - name: actuator_url
             type: String
-            value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs)
+            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/actuator/mappings
+          - name: generated_openapi_url
+            type: String
+            value: http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs
           - name: provider_oas_path
             type: String
             value: fixtures/paypal/checkout_orders_v2.json
@@ -35,6 +41,12 @@ pipeline:
           - name: subset_path
             type: String
             value: config/subsets/orders-demo.json
+          - name: contract_policy_path
+            type: String
+            value: config/contract-policy.json
+          - name: route_exceptions_path
+            type: String
+            value: config/route-exceptions.json
           - name: route_policy
             type: String
             value: block
@@ -47,77 +59,132 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: Wait for lower-environment application and export routes
-                  identifier: export_lower_environment_routes
+                  name: Collect authoritative and secondary route inventories
+                  identifier: collect_route_inventories
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node tools/pact-harness/scripts/collect-route-inventories.mjs \
+                        --actuator-url '<+stage.variables.actuator_url>' \
+                        --openapi-url '<+stage.variables.generated_openapi_url>' \
+                        --out-dir .contract-reports/inventory
+              - step:
+                  type: Run
+                  name: Complete consumer contract gate
+                  identifier: complete_consumer_contract_gate
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node tools/pact-harness/contract-gate.mjs \
+                        --oas '<+stage.variables.provider_oas_path>' \
+                        --pact '<+stage.variables.consumer_contract_path>' \
+                        --routes .contract-reports/inventory/actuator-mappings.json \
+                        --subset '<+stage.variables.subset_path>' \
+                        --policy '<+stage.variables.contract_policy_path>' \
+                        --exceptions '<+stage.variables.route_exceptions_path>' \
+                        --environment lower \
+                        --route-policy '<+stage.variables.route_policy>' \
+                        --report-dir .contract-reports \
+                        --complete-results
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/contract-gate-summary.xml
+                          - .contract-reports/oas-audit.xml
+                          - .contract-reports/consumer-bdc.xml
+                          - .contract-reports/route-contract.xml
+              - step:
+                  type: Run
+                  name: Cross-check generated OpenAPI inventory
+                  identifier: cross_check_generated_openapi
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
+                        --spec '<+stage.variables.provider_oas_path>' \
+                        --routes .contract-reports/inventory/generated-openapi.json \
+                        --subset '<+stage.variables.subset_path>' \
+                        --exceptions '<+stage.variables.route_exceptions_path>' \
+                        --policy '<+stage.variables.route_policy>' \
+                        --json-out .contract-reports/generated-openapi-route-contract.json \
+                        --junit-out .contract-reports/generated-openapi-route-contract.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/generated-openapi-route-contract.xml
+              - step:
+                  type: Run
+                  name: Postman CLI lower-environment cases
+                  identifier: postman_cli_lower_cases
                   spec:
                     connectorRef: <+input>
                     image: node:24-bookworm-slim
                     shell: Sh
                     envVariables:
-                      APP_BASE_URL: <+stage.variables.app_base_url>
-                      INVENTORY_URL: <+stage.variables.inventory_url>
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_api_key")>
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                     command: |
                       set -eu
-                      mkdir -p .contract-reports
+                      npm install --global postman-cli@1.44.0
+                      if [ -n '<+pipeline.variables.POSTMAN_COLLECTION_ID>' ]; then
+                        node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
+                          --collection '<+pipeline.variables.POSTMAN_COLLECTION_ID>' \
+                          --base-url '<+stage.variables.app_base_url>' \
+                          --out-dir .contract-reports/postman \
+                          --cloud
+                      else
+                        node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
+                          --collection fixtures/paypal/orders-lower.postman_collection.json \
+                          --base-url '<+stage.variables.app_base_url>' \
+                          --out-dir .contract-reports/postman
+                      fi
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/postman/postman-run.xml
+              - step:
+                  type: Run
+                  name: Seal JSON evidence
+                  identifier: seal_json_evidence
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
                       node --input-type=module <<'NODE'
-                      let healthy = false;
-                      for (let attempt = 1; attempt <= 60; attempt++) {
-                        try {
-                          const response = await fetch(`${process.env.APP_BASE_URL}/actuator/health`);
-                          if (response.ok) { healthy = true; break; }
-                        } catch {}
-                        await new Promise((resolve) => setTimeout(resolve, 5000));
-                      }
-                      if (!healthy) throw new Error('lower-environment application never became healthy');
-                      const inventory = await fetch(process.env.INVENTORY_URL);
-                      if (!inventory.ok) throw new Error(`route inventory returned ${inventory.status}`);
-                      const { writeFileSync } = await import('node:fs');
-                      writeFileSync('.contract-reports/application-routes.json', await inventory.text());
+                      import { createHash } from 'node:crypto';
+                      import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+                      const files = readdirSync('.contract-reports', { recursive: true })
+                        .filter((file) => String(file).endsWith('.json'))
+                        .map(String)
+                        .sort();
+                      const evidence = files.map((file) => {
+                        const content = readFileSync(`.contract-reports/${file}`);
+                        return {
+                          file,
+                          bytes: content.length,
+                          sha256: createHash('sha256').update(content).digest('hex'),
+                        };
+                      });
+                      writeFileSync(
+                        '.contract-reports/evidence-manifest.json',
+                        `${JSON.stringify({ schemaVersion: 1, files: evidence }, null, 2)}\n`,
+                      );
+                      console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
                       NODE
-              - step:
-                  type: Run
-                  name: Consumer-authored BDC gate
-                  identifier: consumer_bdc_gate
-                  spec:
-                    connectorRef: <+input>
-                    image: node:24-bookworm-slim
-                    shell: Sh
-                    command: |
-                      set -eu
-                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
-                        --oas '<+stage.variables.provider_oas_path>' \
-                        --pact '<+stage.variables.consumer_contract_path>' \
-                        --junit .contract-reports/consumer-bdc.xml
-                    reports:
-                      type: JUnit
-                      spec:
-                        paths:
-                          - .contract-reports/consumer-bdc.xml
-              - step:
-                  type: Run
-                  name: Spec-to-application route parity and rogue detection
-                  identifier: route_parity_and_rogue_detection
-                  spec:
-                    connectorRef: <+input>
-                    image: node:24-bookworm-slim
-                    shell: Sh
-                    command: |
-                      set -eu
-                      node scripts/resolve-postman-cs.mjs \
-                        --artifact compare-routes \
-                        --out .contract-reports/compare-routes.mjs
-                      node .contract-reports/compare-routes.mjs \
-                        --spec '<+stage.variables.provider_oas_path>' \
-                        --routes .contract-reports/application-routes.json \
-                        --subset '<+stage.variables.subset_path>' \
-                        --policy '<+stage.variables.route_policy>' \
-                        --json-out .contract-reports/route-contract.json \
-                        --junit-out .contract-reports/route-contract.xml
-                    reports:
-                      type: JUnit
-                      spec:
-                        paths:
-                          - .contract-reports/route-contract.xml
           infrastructure:
             type: KubernetesDirect
             spec:

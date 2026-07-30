@@ -1,5 +1,6 @@
 package com.paypal.contractdemo.orders;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/v2/checkout/orders")
+@SecurityRequirement(name = "Oauth2")
 public class OrdersController {
 
   @PostMapping

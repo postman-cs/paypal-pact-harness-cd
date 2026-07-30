@@ -16,6 +16,10 @@ const METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', 'optio
  *  becomes the consumer's expected response body (type-checked downstream). */
 function synth(oas, schema, depth = 0) {
   if (depth > 40) return 'x';
+  const resolved = deref(oas, schema) ?? {};
+  if (resolved.example !== undefined) return resolved.example;
+  if (resolved.default !== undefined) return resolved.default;
+  if (Array.isArray(resolved.enum) && resolved.enum.length > 0) return resolved.enum[0];
   const f = flattenAllOf(oas, schema);
   switch (f.type) {
     case 'object': {
@@ -26,7 +30,13 @@ function synth(oas, schema, depth = 0) {
     case 'array': return f.items ? [synth(oas, f.items, depth + 1)] : [];
     case 'integer': case 'number': return 1;
     case 'boolean': return true;
-    default: return 'x'; // string / enum / any
+    default:
+      if (resolved.format === 'date-time') return '2026-01-01T00:00:00Z';
+      if (resolved.format === 'date') return '2026-01-01';
+      if (resolved.format === 'uuid') return '00000000-0000-4000-8000-000000000000';
+      if (resolved.format === 'email') return 'consumer@example.test';
+      if (resolved.pattern && /\\d|\[0-9\]/.test(resolved.pattern)) return '1.00';
+      return 'SAMPLE'; // string / any
   }
 }
 

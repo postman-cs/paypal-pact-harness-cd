@@ -1,18 +1,19 @@
 # paypal-pact-harness-cd
 
-Consumer-driven contract testing (Pact BDC) for PayPal, wired for **GitHub Actions and
-Harness Kubernetes stages**. No broker, server, or database is required for the phase-0
-gate: the deployment matrix is a git-backed ledger (`can-i-deploy`) and the consumer
-engine ships as an install-free bundle.
+Consumer-driven contract testing (Pact-style static BDC) for PayPal, wired for
+**GitHub Actions and Harness Kubernetes stages**. The gate itself has no server or
+database: it ships as an install-free, platform-agnostic CLI bundle. The first
+end-to-end proof still runs against a real Spring Boot application in a lower
+Kubernetes environment.
 
 **Consumer engine source of truth.** This repo carries the engine source
 (`src/`), the tests (`test/`), the build (`scripts/build-bundle.mjs` → `tools/pact-harness`),
 the fixtures, the GitHub composite action, Harness stages, the Orders Spring Boot lower-
 environment wrapper, and a seeded ledger. Application-route parity and rogue endpoint
-detection resolve the production
+detection vendor the exact comparator from the production
 [`postman-cs/paypal-harness-postman-stages`](https://github.com/postman-cs/paypal-harness-postman-stages)
-comparator at the full commit and SHA-256 recorded in `postman-cs.lock.json`; that capability
-is intentionally not copied into a personal wrapper.
+repository at the full commit and SHA-256 recorded in `postman-cs.lock.json`. CI
+verifies that digest before executing it, with no runtime network dependency.
 
 ## Run the demo (zero setup, no Harness needed to see it work)
 
@@ -28,14 +29,16 @@ committed files.
 ## GitHub Action
 
 `action.yml` is the modular gate for an existing workflow. It accepts a consumer Pact,
-consumer OAS, or Postman collection; verifies the consumer expectations against the provider
-OAS; and optionally compares the selected OAS routes to a live application route inventory in
-both directions.
+consumer OAS, or Postman collection; verifies deep request/response schemas and consumer
+examples against the provider OAS; audits operation security and positive/negative cases;
+optionally checks a selected-surface OAS diff; validates governed mismatch exceptions; and
+compares selected OAS routes to a live application inventory in both directions.
 
 `.github/workflows/contract-gate.yml` tests the engine, runs the action against committed
-Orders evidence, starts the real Spring Boot wrapper, gates its generated `/v3/api-docs`
-inventory, proves consumer drift and rogue endpoints fail closed, and publishes an immutable
-lower-environment image.
+Orders evidence, starts the real Spring Boot wrapper, gates authoritative
+`/actuator/mappings`, cross-checks generated `/v3/api-docs`, uses Postman CLI 1.44.0 for
+authenticated positive and negative cases, proves schema drift and rogue endpoints fail
+closed, uploads JUnit/JSON plus the packaged CLI, and publishes an immutable image.
 
 ## Harness stages and pipelines
 
@@ -46,7 +49,7 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
 - `harness/contract-gate.lower.pipeline.yaml` — complete lower-environment import template.
 - `harness/contract-gate.self-test.pipeline.yaml` — zero-secret Harness Cloud proof, usable
   while a Kubernetes delegate is unavailable.
-- `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed production shape,
+- `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed future service shape,
   with Postman CLI used where a native primitive exists.
 
 ## Develop / rebuild
@@ -56,6 +59,7 @@ npm install          # dev only (yaml, for tests + rebuilding the bundle)
 npm test             # engine, ledger, topology, and supply-chain tests
 npm run check        # determinism: golden pact matches its generator
 npm run build:bundle # regenerate tools/pact-harness/ from src/ (what the pipelines run)
+npm run package:bundle # produce the portable .tgz + SHA-256 release metadata in dist/
 ```
 The **pipelines never `npm install`** — they call the committed `tools/pact-harness` bundle.
 `npm install` is only for running the tests or rebuilding that bundle.
@@ -69,7 +73,7 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 | `tools/pact-harness/` | the committed, install-free CLI bundle (what the pipelines call) |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |
 | `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and lower-environment manifest |
-| `config/` | selected spec subset and explicit application/spec relationship graph |
+| `config/` | subset selectors, contract policy, governed exceptions, and app/spec graph |
 | `contracts/` | the git-backed ledger (pacts, providers, verifications, what's live in `production`) |
 | `fixtures/` | real PayPal Orders specs (good + drifted) + consumer pacts/collections |
 | `demo/demo.mjs` | the runnable demo (no Harness needed to see it work) |
@@ -77,8 +81,9 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 
 ## Actions vs Harness — the point
 
-The contract intelligence is platform-agnostic; the CI platform only decides where it executes
-and where a red verdict blocks promotion. The action and Harness stage invoke the same bundled
-engine, the same Postman-CS comparator, and the same relationship/subset inputs. See
+GitHub packages and validates the code, uploads evidence, and publishes the demo image.
+Harness is the PayPal execution and promotion-control plane: its modular stage runs the same
+bundle inside the existing Kubernetes pipeline and a red verdict blocks the downstream
+promotion. Neither platform owns the contract logic. See
 [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) for the evidence map and
 [`docs/CONSUMER-DRIVEN.md`](docs/CONSUMER-DRIVEN.md) for the recommended production evolution.
