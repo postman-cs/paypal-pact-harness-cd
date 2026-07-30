@@ -32,6 +32,8 @@ spec:
         paypal.com/environment: lower
     spec:
       automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: postman-cs-ghcr
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true

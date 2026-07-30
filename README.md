@@ -98,7 +98,7 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 | `paypal-contract-gate.mjs`, `paypal-contract-gate.config.json` | TPE-friendly entry point and single versioned profile |
 | `PAYPAL-TPE-QUICKSTART.md` | clone-to-green handoff and live lower-service setup |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |
-| `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and lower-environment manifest |
+| `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and optional standalone lower deployment |
 | `config/` | subset selectors, contract policy, governed exceptions, and app/spec graph |
 | `contracts/` | the git-backed ledger (pacts, providers, verifications, what's live in `production`) |
 | `fixtures/` | real PayPal Orders specs (good + drifted) + consumer pacts/collections |
