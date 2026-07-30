@@ -45,7 +45,7 @@ spec:
           emptyDir: {}
       containers:
         - name: orders-spring
-          image: ghcr.io/danielshively-source/paypal-pact-harness-cd/orders-spring-wrapper@sha256:b69d09923f34bc230205c8505adef7c1f2b358187f3347647a7d51b06db34f36
+          image: ghcr.io/postman-cs/paypal-pact-harness-cd/orders-spring-wrapper@sha256:a1dd972b452c326a26941cde0916a607f7aa60104f14d6898ab38ef779d7376c
           imagePullPolicy: Always
           env:
             - name: CONTRACT_DEMO_TOKEN
