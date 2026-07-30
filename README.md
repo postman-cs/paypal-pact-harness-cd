@@ -53,6 +53,9 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
 - `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed future service shape,
   with Postman CLI used where a native primitive exists.
 
+The complete component map and execution sequence are in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Develop / rebuild
 
 ```bash
@@ -79,6 +82,7 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 | `fixtures/` | real PayPal Orders specs (good + drifted) + consumer pacts/collections |
 | `demo/demo.mjs` | the runnable demo (no Harness needed to see it work) |
 | `harness/` | drop-in stage plus self-test, lower, and Postman-backed pipeline templates |
+| `docs/ARCHITECTURE.md` | complete system map, execution sequence, evidence flow, and ownership boundaries |
 
 ## Actions vs Harness — the point
 
