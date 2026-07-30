@@ -1,0 +1,9 @@
+{
+  "consumer": "orders-checkout-consumer",
+  "consumerVersion": "1.0.0",
+  "provider": "paypal-orders",
+  "providerVersion": "v2-2026-07-01",
+  "ok": true,
+  "at": "2026-07-30T01:05:37.228Z",
+  "reasons": []
+}

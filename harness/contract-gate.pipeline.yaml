@@ -1,0 +1,67 @@
+# The whole consumer-driven contract gate as ONE Harness CI pipeline — same engine as
+# the GitHub Actions twin, just a different runner. No broker, no server, no npm install:
+# it calls the vendored bundle (tools/pact-harness) against committed fixtures + the
+# seeded git ledger, so it runs green with ZERO secrets. Import into Harness; the
+# org/project identifiers get set on import.
+pipeline:
+  name: Contract gate (Harness · no box)
+  identifier: contract_gate
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>   # your git connector to this repo
+        build: <+input>
+  stages:
+    - stage:
+        name: Contract gate
+        identifier: contract_gate
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform: { os: Linux, arch: Amd64 }
+          runtime: { type: Cloud, spec: {} }   # or KubernetesDirect on your own cluster
+          execution:
+            steps:
+              - step:
+                  name: Immediate BDC gate (consumer pact × provider OAS)
+                  identifier: bdc_gate
+                  type: Run
+                  spec:
+                    image: node:20
+                    shell: Sh
+                    command: |
+                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --oas fixtures/orders-oas.json --pact fixtures/orders-consumer.pact.json
+              - step:
+                  name: Fleet can-i-deploy over the committed ledger (v2 live -> YES)
+                  identifier: fleet_can_i_deploy
+                  type: Run
+                  spec:
+                    image: node:20
+                    shell: Sh
+                    command: |
+                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --ledger contracts --pacticipant paypal-orders --version v2-2026-07-01 --to production
+              - step:
+                  name: Fail-closed proof (a drift release is blocked)
+                  identifier: fail_closed_proof
+                  type: Run
+                  spec:
+                    image: node:20
+                    shell: Sh
+                    command: |
+                      node tools/pact-harness/pact-harness.mjs record-verification \
+                        --ledger contracts --oas fixtures/orders-oas.drift.json \
+                        --pact fixtures/orders-consumer.pact.json \
+                        --consumer-version 1.0.0 --provider-version v3-rename-status
+                      if node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                           --ledger contracts --pacticipant paypal-orders --version v3-rename-status --to production; then
+                        echo "drift release was NOT blocked"; exit 1
+                      else
+                        echo "drift release correctly blocked (fail-closed)"
+                      fi
+# Real-consumer variant: pull the collection + OAS via the Postman CLI, record + push
+# to a SHARED contracts repo (secret: ledger_git_token), and run record-deployment from
+# your promotion step. Same commands as demo/demo.mjs, just against the shared ledger.
