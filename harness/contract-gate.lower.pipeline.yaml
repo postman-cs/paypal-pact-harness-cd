@@ -1,5 +1,8 @@
 # First customer validation: this modular CI stage runs on KubernetesDirect
 # against the authenticated Orders Spring Boot wrapper in the lower environment.
+# Harness applies a 500Mi floor to CI step containers. The Spring background
+# container is intentionally capped at 640Mi so the complete build pod fits the
+# existing 8Gi lower K3s node without displacing customer workloads.
 pipeline:
   name: PayPal contract gate - lower
   identifier: paypal_contract_gate_lower
@@ -74,8 +77,8 @@ pipeline:
                       exec java -jar target/orders-spring-wrapper-0.1.0.jar
                     resources:
                       limits:
-                        memory: 2Gi
-                        cpu: "1"
+                        memory: 640Mi
+                        cpu: "0.5"
               - step:
                   type: Run
                   name: Collect authoritative and secondary route inventories
@@ -89,11 +92,12 @@ pipeline:
                       node tools/pact-harness/scripts/collect-route-inventories.mjs \
                         --actuator-url '<+stage.variables.actuator_url>' \
                         --openapi-url '<+stage.variables.generated_openapi_url>' \
-                        --out-dir .contract-reports/inventory
+                        --out-dir .contract-reports/inventory \
+                        --attempts 60
                     resources:
                       limits:
-                        memory: 1Gi
-                        cpu: "1"
+                        memory: 500Mi
+                        cpu: "0.25"
               - step:
                   type: Run
                   name: Complete consumer contract gate
@@ -125,8 +129,8 @@ pipeline:
                           - .contract-reports/route-contract.xml
                     resources:
                       limits:
-                        memory: 1Gi
-                        cpu: "1"
+                        memory: 500Mi
+                        cpu: "0.25"
               - step:
                   type: Run
                   name: Cross-check generated OpenAPI inventory
@@ -152,8 +156,8 @@ pipeline:
                           - .contract-reports/generated-openapi-route-contract.xml
                     resources:
                       limits:
-                        memory: 1Gi
-                        cpu: "1"
+                        memory: 500Mi
+                        cpu: "0.25"
               - step:
                   type: Run
                   name: Postman CLI lower-environment cases
@@ -187,8 +191,8 @@ pipeline:
                           - .contract-reports/postman/postman-run.xml
                     resources:
                       limits:
-                        memory: 2Gi
-                        cpu: "1"
+                        memory: 500Mi
+                        cpu: "0.5"
               - step:
                   type: Run
                   name: Seal JSON evidence
@@ -222,8 +226,8 @@ pipeline:
                       NODE
                     resources:
                       limits:
-                        memory: 1Gi
-                        cpu: "1"
+                        memory: 500Mi
+                        cpu: "0.25"
           infrastructure:
             type: KubernetesDirect
             spec:
