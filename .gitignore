@@ -2,5 +2,6 @@
 node_modules/
 dist/
 .contract-reports/
+demo/orders-spring/target/
 *.log
 .DS_Store
