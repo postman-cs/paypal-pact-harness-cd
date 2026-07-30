@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "environment": "lower",
+  "applications": [
+    {
+      "id": "orders-spring-wrapper",
+      "inventory": "http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs"
+    },
+    {
+      "id": "orders-checkout-consumer",
+      "contract": "fixtures/paypal/orders-consumer.pact.json"
+    },
+    {
+      "id": "orders-reporting-consumer",
+      "contract": "fixtures/paypal/orders-lite-consumer.postman_collection.json"
+    }
+  ],
+  "specifications": [
+    {
+      "id": "paypal-orders-v2",
+      "path": "fixtures/paypal/checkout_orders_v2.json"
+    },
+    {
+      "id": "paypal-catalog-products-v1",
+      "path": "fixtures/paypal/catalogs_products_v1.json"
+    }
+  ],
+  "relationships": [
+    {
+      "application": "orders-spring-wrapper",
+      "specification": "paypal-orders-v2",
+      "subset": "config/subsets/orders-demo.json"
+    },
+    {
+      "application": "orders-checkout-consumer",
+      "specification": "paypal-orders-v2"
+    },
+    {
+      "application": "orders-reporting-consumer",
+      "specification": "paypal-orders-v2"
+    }
+  ]
+}

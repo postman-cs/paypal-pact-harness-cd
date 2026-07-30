@@ -76,3 +76,15 @@ test('a missing required provider query param is flagged', () => {
 test('bdcVerify is deterministic', () => {
   assert.deepEqual(bdcVerify(goodOas, pact), bdcVerify(goodOas, pact));
 });
+
+test('an empty consumer contract fails closed instead of passing vacuously', () => {
+  const empty = {
+    consumer: { name: 'empty-consumer' },
+    provider: { name: 'paypal-orders' },
+    interactions: [],
+  };
+  const result = bdcVerify(goodOas, empty);
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.failed, 1);
+  assert.ok(canIDeploy(result).reasons.some((r) => r.includes('contract-empty')));
+});

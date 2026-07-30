@@ -1,0 +1,175 @@
+name: PayPal consumer contract gate
+description: >-
+  Consumer-authored Pact/OAS/Postman contract verification plus optional
+  bidirectional application-route comparison with explicit rogue detection.
+
+inputs:
+  provider-oas:
+    description: Repository-relative provider OpenAPI document.
+    required: true
+  consumer-contract:
+    description: Repository-relative consumer Pact, consumer OAS, or Postman collection.
+    required: true
+  consumer-format:
+    description: pact, oas, or postman.
+    required: false
+    default: pact
+  provider-name:
+    description: Provider identity used when converting an OAS or Postman collection to Pact.
+    required: false
+    default: paypal-orders
+  application-routes:
+    description: >-
+      Optional repository-relative application route inventory. Accepts Spring
+      Actuator mappings, generated OpenAPI, or [{method,path}] JSON.
+    required: false
+    default: ""
+  spec-subset:
+    description: Optional repository-relative include/exclude selector applied to both route sets.
+    required: false
+    default: ""
+  route-exceptions:
+    description: Optional repository-relative approved mismatch register.
+    required: false
+    default: ""
+  strip-prefix:
+    description: Optional application route prefix removed before comparison.
+    required: false
+    default: ""
+  route-policy:
+    description: block or warn.
+    required: false
+    default: block
+  report-directory:
+    description: Safe repository-relative output directory for JSON and JUnit evidence.
+    required: false
+    default: .contract-reports
+
+outputs:
+  consumer-pact:
+    description: Normalized consumer Pact used by the gate.
+    value: ${{ steps.paths.outputs.consumer-pact }}
+  bdc-junit:
+    description: Consumer contract JUnit report.
+    value: ${{ steps.paths.outputs.bdc-junit }}
+  route-json:
+    description: Bidirectional route-comparison JSON report, when application-routes is supplied.
+    value: ${{ steps.paths.outputs.route-json }}
+  route-junit:
+    description: Bidirectional route-comparison JUnit report, when application-routes is supplied.
+    value: ${{ steps.paths.outputs.route-junit }}
+
+runs:
+  using: composite
+  steps:
+    - id: guard
+      name: Validate contract gate inputs
+      shell: bash
+      env:
+        PROVIDER_OAS: ${{ inputs.provider-oas }}
+        CONSUMER_CONTRACT: ${{ inputs.consumer-contract }}
+        CONSUMER_FORMAT: ${{ inputs.consumer-format }}
+        APPLICATION_ROUTES: ${{ inputs.application-routes }}
+        SPEC_SUBSET: ${{ inputs.spec-subset }}
+        ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
+        ROUTE_POLICY: ${{ inputs.route-policy }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: |
+        set -euo pipefail
+        case "$CONSUMER_FORMAT" in pact|oas|postman) ;; *)
+          echo "::error::consumer-format must be pact, oas, or postman"; exit 2 ;;
+        esac
+        case "$ROUTE_POLICY" in block|warn) ;; *)
+          echo "::error::route-policy must be block or warn"; exit 2 ;;
+        esac
+        for path in "$PROVIDER_OAS" "$CONSUMER_CONTRACT" "$APPLICATION_ROUTES" \
+          "$SPEC_SUBSET" "$ROUTE_EXCEPTIONS" "$REPORT_DIRECTORY"; do
+          case "$path" in
+            /*|..|../*|*/../*|*/..) echo "::error::paths must be safe and repository-relative"; exit 2 ;;
+          esac
+        done
+        test -f "$PROVIDER_OAS"
+        test -f "$CONSUMER_CONTRACT"
+        for optional in "$APPLICATION_ROUTES" "$SPEC_SUBSET" "$ROUTE_EXCEPTIONS"; do
+          test -z "$optional" || test -f "$optional"
+        done
+        mkdir -p "$REPORT_DIRECTORY"
+
+    - id: paths
+      name: Normalize the consumer-authored contract
+      shell: bash
+      env:
+        CONSUMER_CONTRACT: ${{ inputs.consumer-contract }}
+        CONSUMER_FORMAT: ${{ inputs.consumer-format }}
+        PROVIDER_NAME: ${{ inputs.provider-name }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: |
+        set -euo pipefail
+        PACT="$REPORT_DIRECTORY/consumer.pact.json"
+        case "$CONSUMER_FORMAT" in
+          pact)
+            cp "$CONSUMER_CONTRACT" "$PACT"
+            ;;
+          oas)
+            node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" oas-to-pact \
+              --oas "$CONSUMER_CONTRACT" --provider "$PROVIDER_NAME" --out "$PACT"
+            ;;
+          postman)
+            node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" postman-to-pact \
+              --collection "$CONSUMER_CONTRACT" --provider "$PROVIDER_NAME" --out "$PACT"
+            ;;
+        esac
+        echo "consumer-pact=$PACT" >> "$GITHUB_OUTPUT"
+        echo "bdc-junit=$REPORT_DIRECTORY/consumer-bdc.xml" >> "$GITHUB_OUTPUT"
+        echo "route-json=$REPORT_DIRECTORY/route-contract.json" >> "$GITHUB_OUTPUT"
+        echo "route-junit=$REPORT_DIRECTORY/route-contract.xml" >> "$GITHUB_OUTPUT"
+
+    - id: bdc
+      name: Verify consumer expectations against the provider OAS
+      shell: bash
+      env:
+        PROVIDER_OAS: ${{ inputs.provider-oas }}
+        PACT: ${{ steps.paths.outputs.consumer-pact }}
+        BDC_JUNIT: ${{ steps.paths.outputs.bdc-junit }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" can-i-deploy \
+          --oas "$PROVIDER_OAS" --pact "$PACT" --junit "$BDC_JUNIT"
+
+    - id: dependency
+      if: ${{ inputs.application-routes != '' }}
+      name: Resolve the pinned Postman-CS route comparator
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP:-/tmp}/paypal-contract-gate"
+        node "$GITHUB_ACTION_PATH/scripts/resolve-postman-cs.mjs" \
+          --lock "$GITHUB_ACTION_PATH/postman-cs.lock.json" \
+          --artifact compare-routes \
+          --out "${RUNNER_TEMP:-/tmp}/paypal-contract-gate/compare-routes.mjs"
+
+    - id: routes
+      if: ${{ inputs.application-routes != '' }}
+      name: Compare selected spec routes to application routes bidirectionally
+      shell: bash
+      env:
+        PROVIDER_OAS: ${{ inputs.provider-oas }}
+        APPLICATION_ROUTES: ${{ inputs.application-routes }}
+        SPEC_SUBSET: ${{ inputs.spec-subset }}
+        ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
+        STRIP_PREFIX: ${{ inputs.strip-prefix }}
+        ROUTE_POLICY: ${{ inputs.route-policy }}
+        ROUTE_JSON: ${{ steps.paths.outputs.route-json }}
+        ROUTE_JUNIT: ${{ steps.paths.outputs.route-junit }}
+      run: |
+        set -euo pipefail
+        set -- \
+          --spec "$PROVIDER_OAS" \
+          --routes "$APPLICATION_ROUTES" \
+          --policy "$ROUTE_POLICY" \
+          --json-out "$ROUTE_JSON" \
+          --junit-out "$ROUTE_JUNIT"
+        test -z "$SPEC_SUBSET" || set -- "$@" --subset "$SPEC_SUBSET"
+        test -z "$ROUTE_EXCEPTIONS" || set -- "$@" --exceptions "$ROUTE_EXCEPTIONS"
+        test -z "$STRIP_PREFIX" || set -- "$@" --strip-prefix "$STRIP_PREFIX"
+        node "${RUNNER_TEMP:-/tmp}/paypal-contract-gate/compare-routes.mjs" "$@"

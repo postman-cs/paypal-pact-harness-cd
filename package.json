@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
-    "check": "node scripts/fixtures-check.mjs",
+    "check": "node scripts/fixtures-check.mjs && node scripts/validate-contract-topology.mjs",
     "build:bundle": "node scripts/build-bundle.mjs",
     "demo": "node demo/demo.mjs"
   },

@@ -95,7 +95,18 @@ export function verifyInteraction(oas, interaction) {
  * @param {object} pact  Parsed Pact v3 consumer contract.
  */
 export function bdcVerify(oas, pact) {
-  const interactions = (pact.interactions ?? []).map((i) => verifyInteraction(oas, i));
+  const sourceInteractions = pact.interactions ?? [];
+  const interactions = sourceInteractions.length
+    ? sourceInteractions.map((i) => verifyInteraction(oas, i))
+    : [{
+        description: 'consumer contract contains interactions',
+        ok: false,
+        failures: [{
+          check: 'contract-empty',
+          detail: 'consumer contract has no interactions; refusing a vacuous pass',
+        }],
+        fields: [],
+      }];
   const failed = interactions.filter((i) => !i.ok).length;
   return {
     consumer: pact.consumer?.name ?? 'unknown-consumer',

@@ -1,9 +1,48 @@
 # Import into Harness
 
-Two pipelines, both here as YAML you import into a Harness CI project. No broker, no
-server — the engine is the vendored bundle (`tools/pact-harness`) and the ledger is a git repo.
+The consumer contract capability is available as one modular Kubernetes stage and
+three runnable pipeline shapes. No broker or server is required for the phase-0
+gate: the consumer engine is the vendored bundle (`tools/pact-harness`) and the
+route comparator is resolved from the real Postman-CS repository with a full commit
+and SHA-256 lock.
 
-## A. `contract-gate.pipeline.yaml` — the self-contained proof (zero secrets)
+## A. Drop-in stage for an existing pipeline
+
+Import `harness/stages/consumer-contract-gate.yaml` before the existing promotion
+stage. Supply:
+
+- the repository codebase connector;
+- the KubernetesDirect connector and lower-environment namespace;
+- a registry connector for the Node runner image;
+- the lower-environment application and route-inventory URLs.
+
+The first validation is locked to `environment_name=lower`. The stage publishes
+consumer BDC and bidirectional route-comparison JUnit.
+
+## B. Lower-environment pipeline
+
+`contract-gate.lower.pipeline.yaml` is the complete KubernetesDirect import shape.
+It targets the Orders Spring wrapper at:
+
+`http://orders-spring.paypal-contract-lower.svc.cluster.local:8080`
+
+Deploy `k8s/orders-spring-lower.yaml` first, using the immutable image produced by
+the GitHub workflow. Do not point the first run at production.
+
+## C. Self-test pipeline
+
+`contract-gate.self-test.pipeline.yaml` is the zero-secret Harness Cloud proof.
+Run it when the Kubernetes delegate is not yet available. It proves:
+
+- the current Orders consumer contract passes;
+- the selected application/spec routes match;
+- consumer-breaking drift is blocked;
+- a deliberately injected rogue endpoint is blocked.
+
+This self-test is execution evidence for the stage logic, but it does not replace
+the required lower-environment Kubernetes run.
+
+## D. Legacy ledger proof
 
 Runs GREEN with no secrets, against the committed fixtures + seeded `contracts/` ledger.
 Good for a first run / demo.
@@ -18,7 +57,7 @@ Good for a first run / demo.
    - fleet `can-i-deploy` over the committed ledger (→ YES),
    - fail-closed proof (a drift release → the step goes RED on purpose if it *isn't* blocked).
 
-## B. `contract-gate.real-consumer.pipeline.yaml` — the production shape
+## E. Real-consumer Postman pipeline
 
 Pulls the consumer collection + provider OAS from Postman, records into a **shared**
 contracts repo, and gates on the fleet.
@@ -39,5 +78,7 @@ a real deploy (one-liner at the bottom of the pipeline file).
 
 ## Parity with GitHub Actions
 
-`paypal-pact-actions` runs the identical flow via `.github/workflows/contract-gate.yml`.
-Same bundle, same ledger, same verdicts — only the runner differs.
+This repository's `.github/workflows/contract-gate.yml` runs the same bundle,
+same locked Postman-CS comparator, same Orders subset, and same fail-closed proofs.
+The GitHub job also starts the Spring Boot wrapper and gates its generated runtime
+OpenAPI inventory.

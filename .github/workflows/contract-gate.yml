@@ -1,0 +1,155 @@
+name: Contract gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: contract-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine-and-action:
+    name: Engine and composite action
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install development dependencies
+        run: npm ci
+      - name: Run engine and topology tests
+        run: npm test
+      - name: Check deterministic fixtures and topology
+        run: npm run check
+      - name: Rebuild and verify the install-free pipeline bundle
+        run: |
+          npm run build:bundle
+          git diff --exit-code -- tools/pact-harness
+      - name: Run consumer and application contract action
+        id: contract
+        uses: ./
+        with:
+          provider-oas: fixtures/paypal/checkout_orders_v2.json
+          consumer-contract: fixtures/paypal/orders-checkout-consumer.postman_collection.json
+          consumer-format: postman
+          provider-name: paypal-orders
+          application-routes: fixtures/paypal/orders-spring-routes.json
+          spec-subset: config/subsets/orders-demo.json
+          route-policy: block
+      - name: Prove consumer drift and rogue endpoints fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node tools/pact-harness/pact-harness.mjs can-i-deploy \
+            --oas fixtures/paypal/checkout_orders_v2.drift.json \
+            --pact "${{ steps.contract.outputs.consumer-pact }}"; then
+            echo "::error::consumer-breaking provider drift was not blocked"
+            exit 1
+          fi
+          node scripts/resolve-postman-cs.mjs \
+            --artifact compare-routes \
+            --out "${RUNNER_TEMP}/compare-routes.mjs"
+          if node "${RUNNER_TEMP}/compare-routes.mjs" \
+            --spec fixtures/paypal/checkout_orders_v2.json \
+            --routes fixtures/paypal/orders-spring-routes.rogue.json \
+            --subset config/subsets/orders-demo.json \
+            --policy block; then
+            echo "::error::rogue application endpoint was not blocked"
+            exit 1
+          fi
+      - name: Upload contract evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: contract-engine-evidence
+          path: .contract-reports/
+          if-no-files-found: error
+
+  spring-lower-environment:
+    name: Spring Boot lower-environment proof
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: demo/orders-spring/pom.xml
+      - name: Test and package the Orders Spring Boot wrapper
+        run: mvn -B -f demo/orders-spring/pom.xml verify
+      - name: Start the lower-environment wrapper and export runtime routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .contract-reports
+          java -jar demo/orders-spring/target/orders-spring-wrapper-0.1.0.jar \
+            > .contract-reports/orders-spring.log 2>&1 &
+          echo "$!" > .contract-reports/orders-spring.pid
+          for attempt in $(seq 1 60); do
+            curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null && break
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null
+          curl --fail --silent http://127.0.0.1:8080/v3/api-docs \
+            --output .contract-reports/runtime-openapi.json
+      - name: Gate the running Spring Boot application
+        uses: ./
+        with:
+          provider-oas: fixtures/paypal/checkout_orders_v2.json
+          consumer-contract: fixtures/paypal/orders-consumer.pact.json
+          consumer-format: pact
+          application-routes: .contract-reports/runtime-openapi.json
+          spec-subset: config/subsets/orders-demo.json
+          route-policy: block
+          report-directory: .contract-reports/spring
+      - name: Stop the lower-environment wrapper
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          test ! -f .contract-reports/orders-spring.pid ||
+            kill "$(cat .contract-reports/orders-spring.pid)" 2>/dev/null || true
+      - name: Upload lower-environment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: spring-lower-environment-evidence
+          path: .contract-reports/
+          if-no-files-found: error
+
+  publish-lower-environment-image:
+    name: Publish lower-environment wrapper image
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - engine-and-action
+      - spring-lower-environment
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable wrapper image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: demo/orders-spring
+          push: true
+          tags: ghcr.io/${{ github.repository }}/orders-spring-wrapper:sha-${{ github.sha }}
+          provenance: true
+          sbom: true

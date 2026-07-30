@@ -1,0 +1,95 @@
+# Zero-secret Harness proof. This runs the exact vendored consumer engine and
+# the exact digest-locked Postman-CS route comparator against committed Orders
+# evidence. It is safe to run before the Kubernetes delegate is available.
+pipeline:
+  name: PayPal contract gate - self test
+  identifier: paypal_contract_gate_self_test
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>
+        build: <+input>
+  stages:
+    - stage:
+        name: Contract gate self test
+        identifier: contract_gate_self_test
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Consumer-authored BDC gate
+                  identifier: consumer_bdc_gate
+                  spec:
+                    image: node:24
+                    shell: Sh
+                    command: |
+                      set -eu
+                      mkdir -p .contract-reports
+                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --oas fixtures/paypal/checkout_orders_v2.json \
+                        --pact fixtures/paypal/orders-consumer.pact.json \
+                        --junit .contract-reports/consumer-bdc.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/consumer-bdc.xml
+              - step:
+                  type: Run
+                  name: Route parity and rogue detection
+                  identifier: route_parity_and_rogue_detection
+                  spec:
+                    image: node:24
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node scripts/resolve-postman-cs.mjs \
+                        --artifact compare-routes \
+                        --out .contract-reports/compare-routes.mjs
+                      node .contract-reports/compare-routes.mjs \
+                        --spec fixtures/paypal/checkout_orders_v2.json \
+                        --routes fixtures/paypal/orders-spring-routes.json \
+                        --subset config/subsets/orders-demo.json \
+                        --policy block \
+                        --json-out .contract-reports/route-contract.json \
+                        --junit-out .contract-reports/route-contract.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/route-contract.xml
+              - step:
+                  type: Run
+                  name: Fail-closed proofs
+                  identifier: fail_closed_proofs
+                  spec:
+                    image: node:24
+                    shell: Sh
+                    command: |
+                      set -eu
+                      if node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --oas fixtures/paypal/checkout_orders_v2.drift.json \
+                        --pact fixtures/paypal/orders-consumer.pact.json; then
+                        echo 'consumer-breaking OAS drift was not blocked' >&2
+                        exit 1
+                      fi
+                      if node .contract-reports/compare-routes.mjs \
+                        --spec fixtures/paypal/checkout_orders_v2.json \
+                        --routes fixtures/paypal/orders-spring-routes.rogue.json \
+                        --subset config/subsets/orders-demo.json \
+                        --policy block; then
+                        echo 'rogue endpoint was not blocked' >&2
+                        exit 1
+                      fi
+                      echo 'consumer drift and rogue endpoint both blocked'

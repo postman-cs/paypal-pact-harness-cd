@@ -1,0 +1,128 @@
+# First customer validation: the modular consumer contract stage runs on
+# KubernetesDirect against the Orders Spring Boot wrapper in the lower
+# environment. Runtime connector and registry connector remain explicit inputs.
+pipeline:
+  name: PayPal contract gate - lower
+  identifier: paypal_contract_gate_lower
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>
+        build: <+input>
+  stages:
+    - stage:
+        name: Contract - Consumer and route gate
+        identifier: consumer_contract_gate
+        type: CI
+        variables:
+          - name: environment_name
+            type: String
+            value: lower
+          - name: app_base_url
+            type: String
+            value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080)
+          - name: inventory_url
+            type: String
+            value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs)
+          - name: provider_oas_path
+            type: String
+            value: fixtures/paypal/checkout_orders_v2.json
+          - name: consumer_contract_path
+            type: String
+            value: fixtures/paypal/orders-consumer.pact.json
+          - name: subset_path
+            type: String
+            value: config/subsets/orders-demo.json
+          - name: route_policy
+            type: String
+            value: block
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Wait for lower-environment application and export routes
+                  identifier: export_lower_environment_routes
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    envVariables:
+                      APP_BASE_URL: <+stage.variables.app_base_url>
+                      INVENTORY_URL: <+stage.variables.inventory_url>
+                    command: |
+                      set -eu
+                      mkdir -p .contract-reports
+                      node --input-type=module <<'NODE'
+                      let healthy = false;
+                      for (let attempt = 1; attempt <= 60; attempt++) {
+                        try {
+                          const response = await fetch(`${process.env.APP_BASE_URL}/actuator/health`);
+                          if (response.ok) { healthy = true; break; }
+                        } catch {}
+                        await new Promise((resolve) => setTimeout(resolve, 5000));
+                      }
+                      if (!healthy) throw new Error('lower-environment application never became healthy');
+                      const inventory = await fetch(process.env.INVENTORY_URL);
+                      if (!inventory.ok) throw new Error(`route inventory returned ${inventory.status}`);
+                      const { writeFileSync } = await import('node:fs');
+                      writeFileSync('.contract-reports/application-routes.json', await inventory.text());
+                      NODE
+              - step:
+                  type: Run
+                  name: Consumer-authored BDC gate
+                  identifier: consumer_bdc_gate
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --oas '<+stage.variables.provider_oas_path>' \
+                        --pact '<+stage.variables.consumer_contract_path>' \
+                        --junit .contract-reports/consumer-bdc.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/consumer-bdc.xml
+              - step:
+                  type: Run
+                  name: Spec-to-application route parity and rogue detection
+                  identifier: route_parity_and_rogue_detection
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node scripts/resolve-postman-cs.mjs \
+                        --artifact compare-routes \
+                        --out .contract-reports/compare-routes.mjs
+                      node .contract-reports/compare-routes.mjs \
+                        --spec '<+stage.variables.provider_oas_path>' \
+                        --routes .contract-reports/application-routes.json \
+                        --subset '<+stage.variables.subset_path>' \
+                        --policy '<+stage.variables.route_policy>' \
+                        --json-out .contract-reports/route-contract.json \
+                        --junit-out .contract-reports/route-contract.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/route-contract.xml
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: <+input>
+              namespace: paypal-contract-lower
+              automountServiceAccountToken: false
+              nodeSelector: {}
+              os: Linux

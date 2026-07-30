@@ -1,0 +1,8 @@
+{
+  "include": [
+    {
+      "pathPrefix": "/v2/checkout/orders"
+    }
+  ],
+  "exclude": []
+}
