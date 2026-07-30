@@ -1,0 +1,98 @@
+# The REAL-consumer Harness pipeline — the production shape. Pulls the consumer
+# collection + provider OAS from Postman (CLI-first), turns the collection into a pact,
+# records the verification into a SHARED contracts ledger repo, and gates on the fleet
+# can-i-deploy. Still no broker/server: the ledger is a git repo, the engine is the
+# vendored bundle (tools/pact-harness). Needs two secrets (below). See harness/IMPORT.md.
+pipeline:
+  name: Contract gate — real consumer (Harness)
+  identifier: contract_gate_real
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>   # git connector to THIS repo (carries the bundle)
+        build: <+input>
+  variables:
+    - name: CONSUMER_COLLECTION_UID
+      type: String
+      value: <+input>
+    - name: PROVIDER_SPEC_ID
+      type: String
+      value: <+input>
+    - name: PROVIDER_NAME
+      type: String
+      value: paypal-orders
+    - name: PROVIDER_VERSION
+      type: String
+      value: <+input>          # the provider OAS version live in TARGET_ENV
+    - name: TARGET_ENV
+      type: String
+      value: production
+    - name: LEDGER_REPO
+      type: String
+      value: <+input>          # e.g. github.com/danielshively-source/paypal-contracts
+  stages:
+    - stage:
+        name: Contract gate (real consumer)
+        identifier: contract_gate_real
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform: { os: Linux, arch: Amd64 }
+          runtime: { type: Cloud, spec: {} }
+          execution:
+            steps:
+              - step:
+                  name: Pull Postman artifacts (CLI-first) + build the pact
+                  identifier: pull_and_pact
+                  type: Run
+                  spec:
+                    image: ghcr.io/postman-cs/postman-tools:node24
+                    shell: Sh
+                    envVariables:
+                      POSTMAN_API_KEY: <+secrets.getValue("postman_service_pmak")>
+                    command: |
+                      node tools/pact-harness/scripts/postman/pull-artifacts.mjs \
+                        --collection-uid "<+pipeline.variables.CONSUMER_COLLECTION_UID>" \
+                        --spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" --out-dir .local
+                      node tools/pact-harness/pact-harness.mjs postman-to-pact \
+                        --collection .local/collection.json \
+                        --provider "<+pipeline.variables.PROVIDER_NAME>" \
+                        --out .local/consumer.pact.json
+              - step:
+                  name: Record verification into the shared ledger (commit + push)
+                  identifier: record_verification
+                  type: Run
+                  spec:
+                    image: node:20
+                    shell: Sh
+                    envVariables:
+                      LEDGER_GIT_TOKEN: <+secrets.getValue("ledger_git_token")>
+                    command: |
+                      git clone --depth 1 "https://x-access-token:${LEDGER_GIT_TOKEN}@<+pipeline.variables.LEDGER_REPO>" .ledger
+                      node tools/pact-harness/pact-harness.mjs record-verification \
+                        --ledger .ledger --oas .local/provider-oas.yaml --pact .local/consumer.pact.json \
+                        --consumer-version "<+codebase.commitSha>" \
+                        --provider-version "<+pipeline.variables.PROVIDER_VERSION>"
+                      git -C .ledger config user.email "ci@paypal-contracts"
+                      git -C .ledger config user.name  "contract-ci"
+                      node tools/pact-harness/scripts/ledger-sync.mjs --dir .ledger \
+                        --message "record: <+pipeline.variables.PROVIDER_NAME> <+codebase.commitSha>"
+              - step:
+                  name: can-i-deploy across the deployed fleet (fails closed)
+                  identifier: fleet_can_i_deploy
+                  type: Run
+                  spec:
+                    image: node:20
+                    shell: Sh
+                    command: |
+                      node tools/pact-harness/pact-harness.mjs can-i-deploy \
+                        --ledger .ledger --pacticipant "<+pipeline.variables.PROVIDER_NAME>" \
+                        --version "<+pipeline.variables.PROVIDER_VERSION>" \
+                        --to "<+pipeline.variables.TARGET_ENV>"
+# record-deployment ("live in prod") runs from your PROMOTION pipeline after a real
+# deploy — never from this gate:
+#   node tools/pact-harness/pact-harness.mjs record-deployment --ledger .ledger \
+#     --pacticipant <svc> --version <sha> --environment production
+#   node tools/pact-harness/scripts/ledger-sync.mjs --dir .ledger --message "deploy: ..."

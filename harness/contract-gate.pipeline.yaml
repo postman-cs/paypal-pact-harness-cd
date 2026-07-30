@@ -1,8 +1,7 @@
-# The whole consumer-driven contract gate as ONE Harness CI pipeline — same engine as
-# the GitHub Actions twin, just a different runner. No broker, no server, no npm install:
-# it calls the vendored bundle (tools/pact-harness) against committed fixtures + the
-# seeded git ledger, so it runs green with ZERO secrets. Import into Harness; the
-# org/project identifiers get set on import.
+# The whole consumer-driven contract gate as ONE importable Harness CI pipeline — the
+# same engine as the GitHub Actions twin, just a different runner. No broker, no server,
+# no npm install: it calls the vendored bundle (tools/pact-harness) against committed
+# fixtures + the seeded git ledger, so it runs GREEN with ZERO secrets. See harness/IMPORT.md.
 pipeline:
   name: Contract gate (Harness · no box)
   identifier: contract_gate
@@ -11,7 +10,7 @@ pipeline:
   properties:
     ci:
       codebase:
-        connectorRef: <+input>   # your git connector to this repo
+        connectorRef: <+input>   # a git connector to THIS repo (paypal-pact-harness-cd)
         build: <+input>
   stages:
     - stage:
@@ -21,7 +20,7 @@ pipeline:
         spec:
           cloneCodebase: true
           platform: { os: Linux, arch: Amd64 }
-          runtime: { type: Cloud, spec: {} }   # or KubernetesDirect on your own cluster
+          runtime: { type: Cloud, spec: {} }   # Harness Cloud; swap for KubernetesDirect on your cluster
           execution:
             steps:
               - step:
@@ -32,8 +31,15 @@ pipeline:
                     image: node:20
                     shell: Sh
                     command: |
+                      mkdir -p .out
                       node tools/pact-harness/pact-harness.mjs can-i-deploy \
-                        --oas fixtures/orders-oas.json --pact fixtures/orders-consumer.pact.json
+                        --oas fixtures/orders-oas.json --pact fixtures/orders-consumer.pact.json \
+                        --junit .out/bdc-gate.xml
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .out/bdc-gate.xml
               - step:
                   name: Fleet can-i-deploy over the committed ledger (v2 live -> YES)
                   identifier: fleet_can_i_deploy
@@ -62,6 +68,3 @@ pipeline:
                       else
                         echo "drift release correctly blocked (fail-closed)"
                       fi
-# Real-consumer variant: pull the collection + OAS via the Postman CLI, record + push
-# to a SHARED contracts repo (secret: ledger_git_token), and run record-deployment from
-# your promotion step. Same commands as demo/demo.mjs, just against the shared ledger.

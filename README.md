@@ -18,14 +18,16 @@ release that renames `status`, then `can-i-deploy` the current provider (**YES**
 proposed one (**NO** — blocked by the consumer live in prod). Pure computation over
 committed files.
 
-## The Harness pipeline
+## The Harness pipelines
 
-`harness/contract-gate.pipeline.yaml` is one importable CI pipeline with three steps —
-BDC gate, fleet `can-i-deploy` over the committed ledger, and a **fail-closed drift
-proof** — each just `node tools/pact-harness/pact-harness.mjs …`. It runs green with **no
-secrets** (self-contained on committed fixtures + ledger). The real-consumer variant
-(Postman pull + push to a shared contracts repo + `record-deployment` on promotion) is
-in the comment at the bottom of that file.
+Two importable pipelines (see [`harness/IMPORT.md`](harness/IMPORT.md)):
+
+- **`harness/contract-gate.pipeline.yaml`** — self-contained proof, **zero secrets**:
+  BDC gate (JUnit published), fleet `can-i-deploy` over the committed ledger, and a
+  **fail-closed drift proof**. Each step is just `node tools/pact-harness/pact-harness.mjs …`.
+- **`harness/contract-gate.real-consumer.pipeline.yaml`** — production shape: pulls the
+  consumer collection + provider OAS from Postman, records into a **shared** contracts
+  repo, gates on the fleet. Needs `postman_service_pmak` + `ledger_git_token`.
 
 ## Layout
 
