@@ -23,9 +23,9 @@ pipeline:
         identifier: consumer_contract_gate
         type: CI
         variables:
-          - name: environment_name
+          - name: config_path
             type: String
-            value: lower
+            value: paypal-contract-gate.config.json
           - name: app_base_url
             type: String
             value: http://127.0.0.1:8080
@@ -35,24 +35,6 @@ pipeline:
           - name: generated_openapi_url
             type: String
             value: http://127.0.0.1:8080/v3/api-docs
-          - name: provider_oas_path
-            type: String
-            value: fixtures/paypal/checkout_orders_v2.json
-          - name: consumer_contract_path
-            type: String
-            value: fixtures/paypal/orders-consumer.pact.json
-          - name: subset_path
-            type: String
-            value: config/subsets/orders-demo.json
-          - name: contract_policy_path
-            type: String
-            value: config/contract-policy.json
-          - name: route_exceptions_path
-            type: String
-            value: config/route-exceptions.json
-          - name: route_policy
-            type: String
-            value: block
         spec:
           cloneCodebase: true
           platform:
@@ -81,78 +63,30 @@ pipeline:
                         cpu: "0.5"
               - step:
                   type: Run
-                  name: Collect authoritative and secondary route inventories
-                  identifier: collect_route_inventories
+                  name: Verify the live lower service from one profile
+                  identifier: verify_lower_contract_profile
                   spec:
                     connectorRef: <+input>
                     image: node:24-bookworm-slim
                     shell: Sh
+                    envVariables:
+                      PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
+                      PAYPAL_CONTRACT_OPENAPI_URL: <+stage.variables.generated_openapi_url>
+                      INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                     command: |
                       set -eu
-                      node tools/pact-harness/scripts/collect-route-inventories.mjs \
-                        --actuator-url '<+stage.variables.actuator_url>' \
-                        --openapi-url '<+stage.variables.generated_openapi_url>' \
-                        --out-dir .contract-reports/inventory \
-                        --attempts 60
-                    resources:
-                      limits:
-                        memory: 500Mi
-                        cpu: "0.25"
-              - step:
-                  type: Run
-                  name: Complete consumer contract gate
-                  identifier: complete_consumer_contract_gate
-                  spec:
-                    connectorRef: <+input>
-                    image: node:24-bookworm-slim
-                    shell: Sh
-                    command: |
-                      set -eu
-                      node tools/pact-harness/contract-gate.mjs \
-                        --oas '<+stage.variables.provider_oas_path>' \
-                        --pact '<+stage.variables.consumer_contract_path>' \
-                        --routes .contract-reports/inventory/actuator-mappings.json \
-                        --subset '<+stage.variables.subset_path>' \
-                        --policy '<+stage.variables.contract_policy_path>' \
-                        --exceptions '<+stage.variables.route_exceptions_path>' \
-                        --environment lower \
-                        --route-policy '<+stage.variables.route_policy>' \
-                        --report-dir .contract-reports \
-                        --complete-results
+                      node paypal-contract-gate.mjs verify \
+                        --config '<+stage.variables.config_path>' \
+                        --clean
                     reports:
                       type: JUnit
                       spec:
                         paths:
                           - .contract-reports/contract-gate-summary.xml
                           - .contract-reports/oas-audit.xml
+                          - .contract-reports/oas-diff.xml
                           - .contract-reports/consumer-bdc.xml
                           - .contract-reports/route-contract.xml
-                    resources:
-                      limits:
-                        memory: 500Mi
-                        cpu: "0.25"
-              - step:
-                  type: Run
-                  name: Cross-check generated OpenAPI inventory
-                  identifier: cross_check_generated_openapi
-                  spec:
-                    connectorRef: <+input>
-                    image: node:24-bookworm-slim
-                    shell: Sh
-                    command: |
-                      set -eu
-                      node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
-                        --spec '<+stage.variables.provider_oas_path>' \
-                        --routes .contract-reports/inventory/generated-openapi.json \
-                        --subset '<+stage.variables.subset_path>' \
-                        --exceptions '<+stage.variables.route_exceptions_path>' \
-                        --policy '<+stage.variables.route_policy>' \
-                        --json-out .contract-reports/generated-openapi-route-contract.json \
-                        --junit-out .contract-reports/generated-openapi-route-contract.xml
-                    reports:
-                      type: JUnit
-                      spec:
-                        paths:
                           - .contract-reports/generated-openapi-route-contract.xml
                     resources:
                       limits:
@@ -195,8 +129,8 @@ pipeline:
                         cpu: "0.5"
               - step:
                   type: Run
-                  name: Seal JSON evidence
-                  identifier: seal_json_evidence
+                  name: Seal all JSON and JUnit evidence
+                  identifier: seal_all_evidence
                   spec:
                     connectorRef: <+input>
                     image: node:24-bookworm-slim
@@ -207,8 +141,10 @@ pipeline:
                       import { createHash } from 'node:crypto';
                       import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
                       const files = readdirSync('.contract-reports', { recursive: true })
-                        .filter((file) => String(file).endsWith('.json'))
                         .map(String)
+                        .filter((file) =>
+                          file !== 'evidence-manifest.json' &&
+                          (file.endsWith('.json') || file.endsWith('.xml') || file.endsWith('.txt')))
                         .sort();
                       const evidence = files.map((file) => {
                         const content = readFileSync(`.contract-reports/${file}`);
