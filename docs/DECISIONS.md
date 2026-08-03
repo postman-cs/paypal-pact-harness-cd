@@ -61,10 +61,11 @@ formats, patterns, numeric/string/array constraints, and `additionalProperties`.
 
 ## D8 — Postman CLI first
 
-Use exact Postman CLI 1.44.0 for login, Spec Hub pull, collection execution, and
-JSON/JUnit reporting. Use the documented Postman API only when no CLI primitive
-exists, currently collection export. Secrets are passed by the runner and never
-written into committed files.
+Use exact Postman CLI 1.45.0 for login, collection execution, Cloud run history,
+and JSON/JUnit reporting. Use the documented Postman API for Spec Hub definitions,
+workspace-membership proof, collection export, and standalone collection upsert
+where the CLI does not expose the required primitive. Secrets are passed by the
+runner and never written into committed files.
 
 ## D9 — Actuator is authoritative
 
@@ -109,3 +110,23 @@ Postman-CS provenance. `verify --clean` executes and seals the entire gate. Adva
 flags remain in the low-level bundle, but PayPal TPE onboarding does not depend on
 them. CI proves the same path on Linux, Windows, and macOS at the Node 20 floor and
 tests the extracted release in a clean directory whose path contains spaces.
+
+## D15 — Postman-first production Pact lifecycle
+
+The rebuilt static BDC, route, schema, and Postman Collection gates remain the
+fast design/provider-conformance layer. Production CDC adds narrowly scoped,
+separate open-source Pact stages: executable consumer publication, official
+provider verification with states/selectors/pending/WIP, `can-i-deploy` before the
+real PayPal deployment, and `record-deployment` only after deployment and required
+Postman smoke checks succeed. Both OAS inputs are fetched from their declared
+Postman workspaces and digest-sealed. The Git ledger remains phase-0 only.
+
+## D16 — Harness owns checkout; source attestation runs first
+
+The portable CLI is execution payload, not a Git client. Harness clones the
+pipeline codebase through its GitHub connector with the repository name fixed to
+`paypal-pact-harness-cd`. Before any contract or deployment-decision work, source
+attestation verifies the full `postman-cs` repository identity, the exact Harness
+commit SHA, the bundle package identity, and the locked comparator provenance and
+digest. Wrong connectors, stale commits, incomplete bundles, and comparator
+tampering therefore fail before customer APIs or the Pact Broker are contacted.

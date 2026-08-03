@@ -12,6 +12,7 @@ pipeline:
     ci:
       codebase:
         connectorRef: <+input>
+        repoName: paypal-pact-harness-cd
         build: <+input>
   variables:
     - name: POSTMAN_COLLECTION_ID
@@ -43,19 +44,41 @@ pipeline:
           execution:
             steps:
               - step:
+                  type: Run
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+              - step:
                   type: Background
                   name: Orders Spring Boot lower environment
                   identifier: orders_spring_lower_environment
                   spec:
                     connectorRef: <+input>
-                    image: maven:3.9.11-eclipse-temurin-21
+                    image: maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237
                     shell: Sh
                     envVariables:
                       CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                     command: |
                       set -eu
+                      WORKSPACE="$PWD"
+                      mkdir -p "$WORKSPACE/.m2/repository" "$WORKSPACE/.maven-home"
+                      export MAVEN_OPTS="-Duser.home=$WORKSPACE/.maven-home"
                       cd demo/orders-spring
-                      mvn -B -DskipTests package
+                      mvn -B \
+                        -Dmaven.repo.local="$WORKSPACE/.m2/repository" \
+                        -DskipTests package
                       exec java -jar target/orders-spring-wrapper-0.1.0.jar
                     resources:
                       limits:
@@ -67,7 +90,7 @@ pipeline:
                   identifier: verify_lower_contract_profile
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
                       PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
@@ -99,14 +122,17 @@ pipeline:
                   identifier: postman_cli_lower_cases
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
-                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_api_key")>
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                       CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                     command: |
                       set -eu
-                      npm install --global postman-cli@1.44.0
+                      export HOME="$PWD/.ci-home"
+                      mkdir -p "$HOME"
+                      npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                      export PATH="$PWD/.postman-cli/bin:$PATH"
                       if [ -n '<+pipeline.variables.POSTMAN_COLLECTION_ID>' ]; then
                         node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
                           --collection '<+pipeline.variables.POSTMAN_COLLECTION_ID>' \
@@ -134,7 +160,7 @@ pipeline:
                   identifier: seal_all_evidence
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     command: |
                       set -eu
@@ -172,4 +198,11 @@ pipeline:
               namespace: default
               automountServiceAccountToken: false
               nodeSelector: {}
+              containerSecurityContext:
+                runAsNonRoot: true
+                runAsUser: "1000"
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
               os: Linux

@@ -9,6 +9,7 @@ pipeline:
     ci:
       codebase:
         connectorRef: <+input>
+        repoName: paypal-pact-harness-cd
         build: <+input>
   stages:
     - stage:
@@ -27,10 +28,22 @@ pipeline:
             steps:
               - step:
                   type: Run
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  spec:
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+              - step:
+                  type: Run
                   name: Complete consumer contract gate
                   identifier: complete_consumer_contract_gate
                   spec:
-                    image: node:24
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     command: |
                       set -eu
@@ -58,7 +71,7 @@ pipeline:
                   name: Fail-closed proofs
                   identifier: fail_closed_proofs
                   spec:
-                    image: node:24
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     command: |
                       set -eu
@@ -91,7 +104,7 @@ pipeline:
                   name: Seal JSON evidence
                   identifier: seal_json_evidence
                   spec:
-                    image: node:24
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     command: |
                       set -eu

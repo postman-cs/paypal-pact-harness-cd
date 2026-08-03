@@ -1,0 +1,114 @@
+# POSTMAN-FIRST DESIGN PREFLIGHT
+#
+# Both consumer and provider OAS documents remain governed in Postman Spec Hub.
+# This stage is deliberately separate from executable Pact consumer tests: OAS
+# compatibility is fast design evidence, but it is not proof that consumer code
+# made and handled an interaction.
+stage:
+  name: Contract - Postman dual-OAS preflight
+  identifier: postman_dual_oas_preflight
+  type: CI
+  variables:
+    - name: consumer_workspace_id
+      type: String
+      required: true
+      value: <+input>
+    - name: consumer_spec_id
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_workspace_id
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_spec_id
+      type: String
+      required: true
+      value: <+input>
+    - name: consumer_name
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_name
+      type: String
+      required: true
+      value: <+input>
+    - name: contract_policy_path
+      type: String
+      required: true
+      value: <+input>.default(config/contract-policy.json)
+  spec:
+    cloneCodebase: true
+    platform:
+      os: Linux
+      arch: Amd64
+    execution:
+      steps:
+        - step:
+            type: Run
+            name: Pull and compare both Postman OAS contracts
+            identifier: pull_and_compare_postman_oas
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
+                CONSUMER_WORKSPACE_ID: <+stage.variables.consumer_workspace_id>
+                CONSUMER_SPEC_ID: <+stage.variables.consumer_spec_id>
+                PROVIDER_WORKSPACE_ID: <+stage.variables.provider_workspace_id>
+                PROVIDER_SPEC_ID: <+stage.variables.provider_spec_id>
+                CONSUMER_NAME: <+stage.variables.consumer_name>
+                PROVIDER_NAME: <+stage.variables.provider_name>
+                CONTRACT_POLICY_PATH: <+stage.variables.contract_policy_path>
+              command: |
+                set -eu
+                INPUTS=.contract-inputs/postman
+                REPORTS=.contract-reports/postman-oas
+                mkdir -p "$INPUTS" "$REPORTS"
+
+                node tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
+                  --consumer-workspace-id "$CONSUMER_WORKSPACE_ID" \
+                  --consumer-spec-id "$CONSUMER_SPEC_ID" \
+                  --provider-workspace-id "$PROVIDER_WORKSPACE_ID" \
+                  --provider-spec-id "$PROVIDER_SPEC_ID" \
+                  --out-dir "$INPUTS"
+                cp "$INPUTS/postman-oas-provenance.json" \
+                  "$REPORTS/postman-oas-provenance.json"
+
+                node tools/pact-harness/pact-harness.mjs oas-to-pact \
+                  --oas "$INPUTS/consumer-oas.yaml" \
+                  --provider "$PROVIDER_NAME" \
+                  --consumer "$CONSUMER_NAME" \
+                  --out "$INPUTS/consumer-oas.pact.json"
+
+                node tools/pact-harness/pact-harness.mjs bdc-verify \
+                  --oas "$INPUTS/provider-oas.yaml" \
+                  --pact "$INPUTS/consumer-oas.pact.json" \
+                  --policy "$CONTRACT_POLICY_PATH" \
+                  --junit "$REPORTS/postman-oas-bdc.xml" \
+                  --json-out "$REPORTS/postman-oas-bdc.json"
+              reports:
+                type: JUnit
+                spec:
+                  paths:
+                    - .contract-reports/postman-oas/postman-oas-bdc.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
+    infrastructure:
+      type: KubernetesDirect
+      spec:
+        connectorRef: <+input>
+        namespace: <+input>.default(paypal-contract-lower)
+        automountServiceAccountToken: false
+        nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        os: Linux

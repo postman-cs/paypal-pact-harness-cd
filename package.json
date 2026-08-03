@@ -1,9 +1,9 @@
 {
   "name": "paypal-pact-harness-cd",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Consumer-driven contract testing (Pact BDC) for PayPal, wired for Harness. Self-contained: engine source + tests + the vendored, install-free bundle the pipelines call. The 'broker' is a git-backed ledger (can-i-deploy). No box.",
+  "description": "Postman-first contract testing for PayPal: a self-contained static BDC gate plus Harness stages for the official open-source Pact consumer/provider lifecycle.",
   "bin": {
     "pact-harness": "./src/cli.mjs"
   },

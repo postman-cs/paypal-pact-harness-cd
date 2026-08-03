@@ -1,10 +1,68 @@
 # Import into Harness
 
-The consumer contract capability is available as one modular Kubernetes stage and
-three runnable pipeline shapes. No broker or server is required for the phase-0
-gate: the consumer engine is the vendored bundle (`tools/pact-harness`) and the
-route comparator is vendored from the real Postman-CS repository with a full commit
-and SHA-256 lock. The build verifies provenance; pipeline runtime stays offline.
+The consumer contract capability is available as modular Kubernetes stages and
+runnable pipeline shapes. No broker or server is required for the phase-0 gate:
+the consumer engine is the vendored bundle (`tools/pact-harness`) and the route
+comparator is vendored from the real Postman-CS repository with a full commit and
+SHA-256 lock. The production consumer-driven lifecycle uses an externally managed
+OSS Pact Broker and the digest-locked official Pact CLI.
+
+## Production stage order
+
+The stages belong in the pipeline that owns each event; do not combine consumer
+contract generation and provider verification into one provider-owned pipeline.
+
+**Consumer repository:**
+
+1. `stages/postman-oas-preflight.yaml`
+2. the consumer's executable Pact test using its real client
+3. `stages/pact-consumer-publish.yaml`
+4. optional Postman CLI Collection checks
+
+**Provider repository:**
+
+1. start the provider under test and deterministic state handler
+2. `stages/pact-provider-verify.yaml`
+3. `stages/consumer-contract-gate.yaml` for Postman behavioral and route evidence
+
+**Deployment pipeline:**
+
+1. `stages/pact-can-i-deploy.yaml`
+2. PayPal's existing deployment/promotion stage
+3. required Postman CLI target-environment smoke Collection
+4. `stages/pact-record-deployment.yaml`
+
+See `docs/PACT-BROKER-RUNBOOK.md` for why each signal is separate and how to roll
+it out from shadow mode to a blocking production gate.
+
+For a single lower-environment integration run, import
+`contract-gate.broker.pipeline.yaml`. It starts the authenticated demo provider,
+pulls both OAS contracts from Postman, runs the existing static/provider gates,
+publishes the seeded Pact, performs official provider verification, and ends with
+Broker `can-i-deploy`. It intentionally does not deploy or call
+`record-deployment`; the committed Pact is integration-test evidence and must be
+replaced by consumer-repository executable Pact output in production.
+
+## Source checkout and portable CLI trust boundary
+
+Harness performs the Git checkout; the portable CLI does not clone its own source.
+Every complete pipeline in this repository fixes `repoName` to
+`paypal-pact-harness-cd`, enables Harness `cloneCodebase`, and runs
+`scripts/ci/attest-harness-source.mjs` before any provider, Postman, Pact, or
+deployment decision step. The attestation fails closed unless all of these are true:
+
+- `origin` normalizes to `github.com/postman-cs/paypal-pact-harness-cd`;
+- checked-out `HEAD` is the full SHA supplied by `<+codebase.commitSha>`;
+- the committed portable bundle identifies itself as `pact-harness-bundle`; and
+- its Postman-CS comparator repository, commit, provenance, and SHA-256 all match
+  `postman-cs.lock.json`.
+
+Create a repository-scoped GitHub connector whose URL is exactly
+`https://github.com/postman-cs/paypal-pact-harness-cd.git`, with read access and
+API access enabled for webhook triggers. Bind the pipeline's remaining
+`connectorRef: <+input>` to that connector in a Harness Input Set or trigger.
+An account-scoped connector is also supported because `repoName` is fixed and the
+attestation independently verifies the full owner/repository identity.
 
 ## A. PayPal TPE drop-in stage
 
@@ -23,7 +81,8 @@ Supply only:
 - the KubernetesDirect connector and lower-environment namespace;
 - a registry connector for the Node runner image;
 - the lower-environment application, Actuator, and generated OpenAPI URLs; and
-- project secrets `paypal_contract_demo_token` and `paypal_postman_api_key`.
+- project secrets `paypal_contract_demo_token` and
+  `paypal_postman_service_account_pmak`.
 
 The first validation is locked to `environment_name=lower`. The stage publishes
 consumer/audit/route/Postman JUnit, writes JSON for every module, and seals an
@@ -67,24 +126,32 @@ Good for a first run / demo.
 
 1. Harness → your CI project → **Pipelines → + Create a Pipeline → Import From Git**
    (or **Create** then paste the YAML).
-2. Set the **codebase connector** to a git connector pointing at THIS repo
-   (`paypal-pact-harness-cd`); leave runtime as **Cloud** (or point at your own
+2. Set the **codebase connector** to a repository-scoped GitHub connector pointing
+   at `https://github.com/postman-cs/paypal-pact-harness-cd.git`; leave runtime as **Cloud** (or point at your own
    KubernetesDirect infra).
 3. **Run.** Three steps execute:
    - Immediate BDC gate (JUnit published under the run's **Tests** tab),
    - fleet `can-i-deploy` over the committed ledger (→ YES),
    - fail-closed proof (a drift release → the step goes RED on purpose if it *isn't* blocked).
 
-## E. Future real-consumer Postman pipeline
+## E. Phase-0 shared-ledger Postman pipeline
 
 Pulls the consumer collection + provider OAS from Postman, records into a **shared**
-contracts repo, and gates on the fleet.
+contracts repo, and gates on the fleet. This demonstrates distributed ownership but
+does not provide Broker selectors, pending/WIP pacts, or official provider matching.
+Use the production stage order above for PayPal's requested CDC delivery.
 
 Secrets already used by this POC (project scope):
 | Secret | Used for |
 | --- | --- |
-| `paypal_postman_api_key` | Postman CLI login, collection + Spec Hub access |
+| `paypal_postman_service_account_pmak` | Postman CLI login, collection + both Spec Hub workspace reads |
 | `postman_cs_github_pat` | clone + push the optional shared contracts repo |
+| `paypal_pact_broker_token` | Pact publication, verification results, deploy decisions, deployment records |
+| `paypal_pact_provider_bearer_token` | Official verifier calls to the provider under test |
+
+The self-contained lower Broker proof uses `paypal_contract_demo_token` for both
+the demo provider and verifier so the values cannot diverge. The reusable provider
+stage uses `paypal_pact_provider_bearer_token` for a real service-specific credential.
 
 Pipeline inputs when you run: codebase connector (this repo), `CONSUMER_COLLECTION_UID`,
 `PROVIDER_SPEC_ID`, `PROVIDER_VERSION` (the version live in the target env), `LEDGER_REPO`

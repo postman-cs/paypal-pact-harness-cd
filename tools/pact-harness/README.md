@@ -25,6 +25,6 @@ Low-level commands: `postman-to-pact · oas-to-pact · oas-audit · oas-diff ·
 validate-exceptions · bdc-verify · provider-verify · record-verification ·
 record-deployment · can-i-deploy`.
 
-`vendor/yaml` is MIT-licensed. `vendor/postman-cs/compare-routes.mjs` is pulled
+`vendor/yaml` is ISC-licensed. `vendor/postman-cs/compare-routes.mjs` is pulled
 from the exact repository, commit, and digest recorded in its PROVENANCE file.
 Rebuild from source with `node scripts/build-bundle.mjs` in the pact-harness repo.

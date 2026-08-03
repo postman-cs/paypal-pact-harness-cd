@@ -37,11 +37,28 @@ stage:
       steps:
         - step:
             type: Run
+            name: Attest Postman-CS source and portable CLI
+            identifier: source_attestation
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+              command: |
+                set -eu
+                node scripts/ci/attest-harness-source.mjs
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+        - step:
+            type: Run
             name: Verify the lower service from the repository profile
             identifier: verify_lower_contract_profile
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
               shell: Sh
               envVariables:
                 CONFIG_PATH: <+stage.variables.config_path>
@@ -63,22 +80,29 @@ stage:
                     - .contract-reports/consumer-bdc.xml
                     - .contract-reports/route-contract.xml
                     - .contract-reports/generated-openapi-route-contract.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
         - step:
             type: Run
             name: Postman CLI lower-environment cases
             identifier: postman_cli_lower_cases
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
               shell: Sh
               envVariables:
                 APP_BASE_URL: <+stage.variables.app_base_url>
                 POSTMAN_COLLECTION_ID: <+stage.variables.postman_collection_id>
-                POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_api_key")>
+                POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                 CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
-                npm install --global postman-cli@1.44.0
+                export HOME="$PWD/.ci-home"
+                mkdir -p "$HOME"
+                npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                export PATH="$PWD/.postman-cli/bin:$PATH"
                 COLLECTION="$POSTMAN_COLLECTION_ID"
                 [ -n "$COLLECTION" ] ||
                   COLLECTION=fixtures/paypal/orders-lower.postman_collection.json
@@ -93,13 +117,17 @@ stage:
                 spec:
                   paths:
                     - .contract-reports/postman/postman-run.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
         - step:
             type: Run
             name: Seal all JSON and JUnit evidence
             identifier: seal_all_evidence
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
               shell: Sh
               command: |
                 set -eu
@@ -126,6 +154,10 @@ stage:
                 );
                 console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
                 NODE
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
     infrastructure:
       type: KubernetesDirect
       spec:
@@ -133,4 +165,11 @@ stage:
         namespace: <+input>.default(paypal-contract-lower)
         automountServiceAccountToken: false
         nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
         os: Linux

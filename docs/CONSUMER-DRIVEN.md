@@ -18,12 +18,12 @@ consumer Pact × provider OAS. A Postman collection with saved examples or a
 consumer-owned OAS subset can become the consumer contract. This catches
 consumer-breaking OAS changes without requiring a live provider.
 
-It is not yet full Pact-style CDC. Generating a Pact from saved examples does not
+On its own, that engine is not full Pact-style CDC. Generating a Pact from saved examples does not
 prove that the consumer's real API client produced the request or handled the
 response. The bounded verifier also implements only the OAS/Pact rules covered by
 this repository; it is not a substitute for the official Pact matching engine.
 
-## Recommended production evolution
+## Implemented production evolution
 
 1. Keep the Postman-CS spec↔application route stage for synchronization and
    mismatch/rogue detection.
@@ -31,16 +31,20 @@ this repository; it is not a substitute for the official Pact matching engine.
    surface. Postman can run collections in CI and keep collections/specifications
    synchronized, but that is not the same as Pact's consumer-code-generated
    contracts and provider verification matrix.
-3. Move important consumers from saved-example conversion to Pact JVM/JS/etc.
+3. Important consumers now have a dedicated Harness publication stage for pacts
+   produced by Pact JVM/JS/etc.
    tests that execute their real client code against a Pact mock.
-4. Verify those pacts with the official Pact verifier against a locally started
-   provider in CI (the Spring wrapper demonstrates the shape). Use provider states
-   for deterministic data.
-5. Use an OSS Pact Broker or PactFlow when PayPal wants mature version selectors,
-   pending/WIP pacts, webhooks, and canonical `can-i-deploy`. The git ledger is a
-   low-infrastructure phase-0 choice, not an assertion of feature parity.
+4. A dedicated provider stage now invokes the official Pact verifier against a
+   locally started provider, uses provider states, selectors, pending/WIP pacts,
+   and publishes results for the exact provider SHA.
+5. Dedicated OSS Broker stages now perform canonical `can-i-deploy` before the
+   PayPal deployment and `record-deployment` only after it succeeds. The git ledger
+   remains a low-infrastructure phase-0 choice, not an assertion of feature parity.
 6. Keep static OAS BDC as a fast preflight for design/codegen changes even after
    dynamic provider verification is introduced.
+
+The complete implementation and operating model are in
+[`PACT-BROKER-RUNBOOK.md`](PACT-BROKER-RUNBOOK.md).
 
 Official references:
 

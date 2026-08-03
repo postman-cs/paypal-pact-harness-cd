@@ -23,9 +23,11 @@ mkdirSync(dist, { recursive: true });
 cpSync(join(root, 'src'), join(dist, 'src'), { recursive: true });
 mkdirSync(join(dist, 'scripts'), { recursive: true });
 cpSync(join(root, 'scripts', 'ledger-sync.mjs'), join(dist, 'scripts', 'ledger-sync.mjs'));
+cpSync(join(root, 'scripts', 'install-pact-cli.mjs'), join(dist, 'scripts', 'install-pact-cli.mjs'));
 cpSync(join(root, 'scripts', 'postman'), join(dist, 'scripts', 'postman'), { recursive: true });
 cpSync(join(root, 'scripts', 'collect-route-inventories.mjs'), join(dist, 'scripts', 'collect-route-inventories.mjs'));
 cpSync(join(root, 'scripts', 'run-contract-gate.mjs'), join(dist, 'contract-gate.mjs'));
+cpSync(join(root, 'pact-cli.lock.json'), join(dist, 'pact-cli.lock.json'));
 
 // 2. vendor the exact Postman-CS comparator into the portable bundle. The lock
 //    insists on the production repository, a full commit, and a SHA-256 match.
@@ -82,7 +84,7 @@ writeFileSync(
   join(dist, 'package.json'),
   JSON.stringify({
     name: 'pact-harness-bundle',
-    version: '0.3.0',
+    version: '0.4.0',
     private: true,
     type: 'module',
     bin: {
@@ -122,7 +124,7 @@ writeFileSync(
     'validate-exceptions · bdc-verify · provider-verify · record-verification ·',
     'record-deployment · can-i-deploy`.',
     '',
-    '`vendor/yaml` is MIT-licensed. `vendor/postman-cs/compare-routes.mjs` is pulled',
+    '`vendor/yaml` is ISC-licensed. `vendor/postman-cs/compare-routes.mjs` is pulled',
     'from the exact repository, commit, and digest recorded in its PROVENANCE file.',
     'Rebuild from source with `node scripts/build-bundle.mjs` in the pact-harness repo.',
     '',

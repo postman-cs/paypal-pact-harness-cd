@@ -87,6 +87,29 @@ class OrdersControllerTest {
   }
 
   @Test
+  void pactProviderStatesAreAuthenticatedAndDeterministic() throws Exception {
+    mvc.perform(post("/_pact/provider-states")
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"state\":\"an order exists\",\"action\":\"setup\"}"))
+      .andExpect(status().isUnauthorized());
+
+    mvc.perform(post("/_pact/provider-states")
+        .header(AUTHORIZATION, TOKEN)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"state\":\"an order exists\",\"action\":\"setup\"}"))
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.state").value("an order exists"))
+      .andExpect(jsonPath("$.action").value("setup"))
+      .andExpect(jsonPath("$.applied").value(true));
+
+    mvc.perform(post("/_pact/provider-states")
+        .header(AUTHORIZATION, TOKEN)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{}"))
+      .andExpect(status().isBadRequest());
+  }
+
+  @Test
   void generatedOpenApiInventoryIsAvailableToTheRouteGate() throws Exception {
     mvc.perform(get("/v3/api-docs"))
       .andExpect(status().isOk())

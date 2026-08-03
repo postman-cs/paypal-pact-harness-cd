@@ -25,7 +25,8 @@ public class ContractAuthFilter extends OncePerRequestFilter {
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    return !request.getRequestURI().startsWith("/v2/checkout/orders");
+    String path = request.getRequestURI();
+    return !path.startsWith("/v2/checkout/orders") && !path.equals("/_pact/provider-states");
   }
 
   @Override

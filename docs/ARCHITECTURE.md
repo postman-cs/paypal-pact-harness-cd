@@ -22,8 +22,9 @@ flowchart TB
 
   subgraph Build["Source, supply chain, and portable release"]
     EngineSource["Engine source<br/>src/"]
-    UnitTests["74 deterministic tests<br/>test/"]
+    UnitTests["92 deterministic tests<br/>test/"]
     LockedCS["Real postman-cs comparator<br/>full commit + SHA-256 lock"]
+    SourceAttestation["Harness source attestation<br/>repo + commit + bundle provenance"]
     BundleBuild["Deterministic bundle builder"]
     Bundle["Install-free Node CLI bundle<br/>tools/pact-harness/"]
     Archive["Platform-agnostic .tgz<br/>Node 20+, no npm install"]
@@ -31,6 +32,7 @@ flowchart TB
     EngineSource --> UnitTests
     LockedCS -->|"digest verified and vendored"| BundleBuild
     EngineSource --> BundleBuild --> Bundle --> Archive
+    Bundle --> SourceAttestation
   end
 
   subgraph ContractEngine["Portable contract gate"]
@@ -66,7 +68,7 @@ flowchart TB
     Actuator["Authoritative /actuator/mappings"]
     GeneratedOAS["Independent /v3/api-docs cross-check"]
     Inventory["Bounded inventory collector<br/>retry, timeout, redirect denial,<br/>JSON validation, SHA-256 manifest"]
-    PostmanCLI["Postman CLI 1.44.0<br/>positive + negative cases"]
+    PostmanCLI["Postman CLI 1.45.0<br/>positive + negative cases"]
     CloudCollection["Stable Postman Cloud collection"]
     CloudHistory["Postman Cloud run history"]
 
@@ -105,7 +107,7 @@ flowchart TB
 
     Bundle --> Local
     Bundle --> Action --> GitHub
-    Bundle --> HarnessStage --> HarnessK8s --> K3s
+    Bundle --> SourceAttestation --> HarnessStage --> HarnessK8s --> K3s
     GitHub --> GitHubArtifacts
     HarnessK8s --> Spring
     HarnessK8s --> PostmanCLI
@@ -157,7 +159,7 @@ sequenceDiagram
   Pod->>Bundle: Run complete contract gate with subset and policy
   Bundle->>Bundle: Consumer BDC + OAS audit + route parity
   Bundle-->>Evidence: 24 contract JUnit cases + JSON/checksums
-  Pod->>Postman: Run stable collection with Postman CLI 1.44.0
+  Pod->>Postman: Run stable collection with Postman CLI 1.45.0
   Postman->>App: Exercise 9 operations and auth-negative cases
   App-->>Postman: Schema-conformant responses
   Postman-->>Evidence: 12 JUnit cases + JSON + Cloud run history

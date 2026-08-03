@@ -1,7 +1,8 @@
 # paypal-pact-harness-cd
 
-Consumer-driven contract testing for PayPal, packaged as one install-free command
-and one importable Harness Kubernetes stage. The gate has no server or database.
+Postman-first contract testing for PayPal: an install-free static BDC and provider
+conformance gate, plus importable Harness stages for the complete open-source Pact
+consumer/provider lifecycle.
 
 ## PayPal TPE: start here
 
@@ -14,7 +15,7 @@ node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
 
-No `npm install`, Docker, Pact Broker, or dedicated host is needed for this proof.
+No `npm install`, Docker, Pact Broker, or dedicated host is needed for the phase-0 proof.
 The first command checks the machine, profile, files, and locked Postman-CS
 dependency. The second runs the complete lower-environment gate and writes JUnit,
 JSON, and checksums under `.contract-reports/`.
@@ -32,6 +33,12 @@ detection vendor the exact comparator from the production
 [`postman-cs/paypal-harness-postman-stages`](https://github.com/postman-cs/paypal-harness-postman-stages)
 repository at the full commit and SHA-256 recorded in `postman-cs.lock.json`. CI
 verifies that digest before executing it, with no runtime network dependency.
+
+In Harness, `cloneCodebase: true` performs the Git checkout through the configured
+GitHub connector. Before any contract work, the pipeline verifies that the checkout
+is exactly `postman-cs/paypal-pact-harness-cd` at `<+codebase.commitSha>` and that
+the committed portable CLI plus its locked Postman-CS comparator are intact. See
+[`harness/IMPORT.md`](harness/IMPORT.md#source-checkout-and-portable-cli-trust-boundary).
 
 ## Optional ledger demo
 
@@ -54,7 +61,7 @@ compares selected OAS routes to a live application inventory in both directions.
 
 `.github/workflows/contract-gate.yml` tests the engine, runs the action against committed
 Orders evidence, starts the real Spring Boot wrapper, gates authoritative
-`/actuator/mappings`, cross-checks generated `/v3/api-docs`, uses Postman CLI 1.44.0 for
+`/actuator/mappings`, cross-checks generated `/v3/api-docs`, uses Postman CLI 1.45.0 for
 authenticated positive and negative cases, proves schema drift and rogue endpoints fail
 closed, uploads JUnit/JSON plus the packaged CLI, and publishes an immutable image.
 
@@ -68,11 +75,28 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
   import template with the Spring app as an ephemeral Background step.
 - `harness/contract-gate.self-test.pipeline.yaml` — zero-secret Harness Cloud proof, usable
   while a Kubernetes delegate is unavailable.
-- `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed future service shape,
-  with Postman CLI used where a native primitive exists.
+- `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed phase-0 shared-ledger
+  shape, retained as an offline/low-infrastructure demonstration.
+- `harness/contract-gate.broker.pipeline.yaml` — complete lower-environment integration proof:
+  Postman dual-OAS/static gates → Pact publish → official provider verification → Broker
+  `can-i-deploy` (with no fake deployment or premature deployment record).
 
 The complete component map and execution sequence are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+For PayPal's requested production CDC shape, use the five additional stage objects:
+
+- `postman-oas-preflight.yaml` pulls the consumer and provider OAS documents from
+  their declared Postman workspaces and runs the existing static BDC gate;
+- `pact-consumer-publish.yaml` publishes pacts produced by executable consumer tests;
+- `pact-provider-verify.yaml` runs official verification with selectors, provider
+  states, pending/WIP pacts, and result publication;
+- `pact-can-i-deploy.yaml` blocks an incompatible promotion; and
+- `pact-record-deployment.yaml` updates Broker environment state only after the
+  real deployment and Postman smoke checks succeed.
+
+See [`docs/PACT-BROKER-RUNBOOK.md`](docs/PACT-BROKER-RUNBOOK.md) for the ownership
+model, rollout, Harness inputs and secrets, failure triage, and learning path.
 
 ## Maintainers: develop / rebuild
 
@@ -85,8 +109,10 @@ npm run package:bundle # produce the portable .tgz + SHA-256 release metadata in
 npm run test:packed    # extract the .tgz in a clean path and prove it needs no install
 npm run test:all       # full local release gate
 ```
-The **pipelines never `npm install`** — they call the committed `tools/pact-harness` bundle.
-`npm install` is only for running the tests or rebuilding that bundle.
+The contract engine never needs `npm install` at runtime—it calls the committed
+`tools/pact-harness` bundle. The explicit Postman behavioral steps install the exact
+Postman CLI release into the non-root build workspace; maintainers use `npm install`
+only for tests or rebuilding the static bundle.
 
 ## Layout
 
@@ -104,7 +130,9 @@ The **pipelines never `npm install`** — they call the committed `tools/pact-ha
 | `fixtures/` | real PayPal Orders specs (good + drifted) + consumer pacts/collections |
 | `demo/demo.mjs` | the runnable demo (no Harness needed to see it work) |
 | `harness/` | drop-in stage plus self-test, lower, and Postman-backed pipeline templates |
+| `pact-cli.lock.json`, `scripts/install-pact-cli.mjs` | digest-locked official OSS Pact CLI used by production lifecycle stages |
 | `docs/ARCHITECTURE.md` | complete system map, execution sequence, evidence flow, and ownership boundaries |
+| `docs/PACT-BROKER-RUNBOOK.md` | Postman-first Pact CDC topology, operations, rollout, and learning guide |
 
 ## Actions vs Harness — the point
 

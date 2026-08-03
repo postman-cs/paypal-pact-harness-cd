@@ -1,0 +1,291 @@
+# Lower-environment integration proof for the phase-1 Broker track.
+#
+# This deliberately does not deploy or record a deployment. PayPal's real service
+# pipeline imports pact-can-i-deploy immediately before deployment and
+# pact-record-deployment only after deployment + Postman smoke checks succeed.
+# The committed pact used here is seeded integration evidence; production consumer
+# repositories must publish pacts created by executable tests of their real clients.
+pipeline:
+  name: PayPal Postman + Pact Broker proof - lower
+  identifier: paypal_postman_pact_broker_lower
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>
+        repoName: paypal-pact-harness-cd
+        build: <+input>
+  variables:
+    - name: BROKER_BASE_URL
+      type: String
+      value: <+input>
+    - name: CONSUMER_WORKSPACE_ID
+      type: String
+      value: <+input>
+    - name: CONSUMER_SPEC_ID
+      type: String
+      value: <+input>
+    - name: PROVIDER_WORKSPACE_ID
+      type: String
+      value: <+input>
+    - name: PROVIDER_SPEC_ID
+      type: String
+      value: <+input>
+    - name: INCLUDE_WIP_PACTS_SINCE
+      type: String
+      value: <+input>
+    - name: TARGET_ENVIRONMENT
+      type: String
+      value: <+input>.default(lower)
+  stages:
+    - stage:
+        name: Postman-first Broker integration proof
+        identifier: postman_pact_broker_proof
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+              - step:
+                  type: Background
+                  name: Orders provider under test
+                  identifier: orders_provider_under_test
+                  spec:
+                    connectorRef: <+input>
+                    image: maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237
+                    shell: Sh
+                    envVariables:
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      WORKSPACE="$PWD"
+                      mkdir -p "$WORKSPACE/.m2/repository" "$WORKSPACE/.maven-home"
+                      export MAVEN_OPTS="-Duser.home=$WORKSPACE/.maven-home"
+                      cd demo/orders-spring
+                      mvn -B \
+                        -Dmaven.repo.local="$WORKSPACE/.m2/repository" \
+                        -DskipTests package
+                      exec java -jar target/orders-spring-wrapper-0.1.0.jar
+                    resources:
+                      limits:
+                        memory: 640Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Postman dual-OAS and static BDC preflight
+                  identifier: postman_static_preflight
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
+                    command: |
+                      set -eu
+                      INPUTS=.contract-inputs/postman
+                      REPORTS=.contract-reports/postman-oas
+                      mkdir -p "$INPUTS" "$REPORTS"
+                      node tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
+                        --consumer-workspace-id "<+pipeline.variables.CONSUMER_WORKSPACE_ID>" \
+                        --consumer-spec-id "<+pipeline.variables.CONSUMER_SPEC_ID>" \
+                        --provider-workspace-id "<+pipeline.variables.PROVIDER_WORKSPACE_ID>" \
+                        --provider-spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" \
+                        --out-dir "$INPUTS"
+                      cp "$INPUTS/postman-oas-provenance.json" \
+                        "$REPORTS/postman-oas-provenance.json"
+                      node tools/pact-harness/pact-harness.mjs oas-to-pact \
+                        --oas "$INPUTS/consumer-oas.yaml" \
+                        --provider paypal-orders \
+                        --consumer orders-checkout-consumer \
+                        --out "$INPUTS/consumer-oas.pact.json"
+                      node tools/pact-harness/pact-harness.mjs bdc-verify \
+                        --oas "$INPUTS/provider-oas.yaml" \
+                        --pact "$INPUTS/consumer-oas.pact.json" \
+                        --policy config/contract-policy.json \
+                        --junit "$REPORTS/postman-oas-bdc.xml" \
+                        --json-out "$REPORTS/postman-oas-bdc.json"
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/postman-oas/postman-oas-bdc.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Existing Postman and provider-conformance gate
+                  identifier: existing_postman_provider_gate
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      PAYPAL_CONTRACT_ACTUATOR_URL: http://127.0.0.1:8080/actuator/mappings
+                      PAYPAL_CONTRACT_OPENAPI_URL: http://127.0.0.1:8080/v3/api-docs
+                      PAYPAL_CONTRACT_INVENTORY_ATTEMPTS: "60"
+                      INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      node paypal-contract-gate.mjs verify \
+                        --config paypal-contract-gate.config.json
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/contract-gate-summary.xml
+                          - .contract-reports/oas-audit.xml
+                          - .contract-reports/oas-diff.xml
+                          - .contract-reports/consumer-bdc.xml
+                          - .contract-reports/route-contract.xml
+                          - .contract-reports/generated-openapi-route-contract.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Publish seeded lower consumer pact
+                  identifier: publish_seeded_consumer_pact
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
+                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_DO_NOT_TRACK: "true"
+                    command: |
+                      set -eu
+                      mkdir -p .pact/bin .pacts .contract-reports/pact-consumer
+                      cp fixtures/paypal/orders-consumer.pact.json .pacts/
+                      node tools/pact-harness/scripts/install-pact-cli.mjs \
+                        --lock tools/pact-harness/pact-cli.lock.json \
+                        --output .pact/bin/pact
+                      .pact/bin/pact broker publish .pacts \
+                        --consumer-app-version "<+codebase.commitSha>" \
+                        --branch "<+codebase.branch>" \
+                        --validate \
+                        --strict \
+                        --output json \
+                        > .contract-reports/pact-consumer/publish.json
+                      cat .contract-reports/pact-consumer/publish.json
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Official provider verification and publication
+                  identifier: official_provider_verification
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
+                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_DO_NOT_TRACK: "true"
+                      PROVIDER_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      REPORTS=.contract-reports/pact-provider
+                      mkdir -p "$REPORTS"
+                      node tools/pact-harness/scripts/install-pact-cli.mjs \
+                        --lock tools/pact-harness/pact-cli.lock.json \
+                        --output .pact/bin/pact
+                      .pact/bin/pact verifier \
+                        --broker-url "$PACT_BROKER_BASE_URL" \
+                        --provider-name paypal-orders \
+                        --hostname 127.0.0.1 \
+                        --port 8080 \
+                        --transport http \
+                        --header "Authorization=Bearer $PROVIDER_BEARER_TOKEN" \
+                        --state-change-url http://127.0.0.1:8080/_pact/provider-states \
+                        --consumer-version-selectors '[{"mainBranch":true},{"deployedOrReleased":true},{"matchingBranch":true}]' \
+                        --enable-pending \
+                        --include-wip-pacts-since "<+pipeline.variables.INCLUDE_WIP_PACTS_SINCE>" \
+                        --provider-version "<+codebase.commitSha>" \
+                        --provider-branch "<+codebase.branch>" \
+                        --publish \
+                        --junit "$REPORTS/provider-verification.xml" \
+                        --json "$REPORTS/provider-verification.json" \
+                        --no-colour
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/pact-provider/provider-verification.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Broker can-i-deploy lower gate
+                  identifier: broker_can_i_deploy_lower
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
+                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_DO_NOT_TRACK: "true"
+                    command: |
+                      set -eu
+                      REPORTS=.contract-reports/pact-deploy
+                      mkdir -p "$REPORTS"
+                      node tools/pact-harness/scripts/install-pact-cli.mjs \
+                        --lock tools/pact-harness/pact-cli.lock.json \
+                        --output .pact/bin/pact
+                      .pact/bin/pact broker can-i-deploy \
+                        --pacticipant paypal-orders \
+                        --version "<+codebase.commitSha>" \
+                        --to-environment "<+pipeline.variables.TARGET_ENVIRONMENT>" \
+                        --retry-while-unknown 6 \
+                        --retry-interval 10 \
+                        --output json \
+                        > "$REPORTS/can-i-deploy.json"
+                      cat "$REPORTS/can-i-deploy.json"
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: <+input>
+              namespace: <+input>.default(paypal-contract-lower)
+              automountServiceAccountToken: false
+              nodeSelector: {}
+              containerSecurityContext:
+                runAsNonRoot: true
+                runAsUser: "1000"
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              os: Linux

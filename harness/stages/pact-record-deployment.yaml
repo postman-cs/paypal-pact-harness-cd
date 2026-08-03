@@ -1,0 +1,87 @@
+# POST-DEPLOYMENT EVIDENCE
+# Import only after PayPal's real deployment step has succeeded. Recording before
+# deployment would make future can-i-deploy answers use false environment state.
+stage:
+  name: Pact - Record successful deployment
+  identifier: pact_record_deployment
+  type: CI
+  variables:
+    - name: broker_base_url
+      type: String
+      required: true
+      value: <+input>
+    - name: pacticipant
+      type: String
+      required: true
+      value: <+input>
+    - name: version
+      type: String
+      required: true
+      value: <+input>.default(<+codebase.commitSha>)
+    - name: environment
+      type: String
+      required: true
+      value: <+input>
+    - name: application_instance
+      type: String
+      value: <+input>.default("")
+  spec:
+    cloneCodebase: true
+    platform:
+      os: Linux
+      arch: Amd64
+    execution:
+      steps:
+        - step:
+            type: Run
+            name: Record deployment only after success
+            identifier: broker_record_deployment
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
+                PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                PACT_DO_NOT_TRACK: "true"
+                PACTICIPANT: <+stage.variables.pacticipant>
+                PACTICIPANT_VERSION: <+stage.variables.version>
+                DEPLOYED_ENVIRONMENT: <+stage.variables.environment>
+                APPLICATION_INSTANCE: <+stage.variables.application_instance>
+              command: |
+                set -eu
+                REPORTS=.contract-reports/pact-deploy
+                mkdir -p "$REPORTS"
+                node tools/pact-harness/scripts/install-pact-cli.mjs \
+                  --lock tools/pact-harness/pact-cli.lock.json \
+                  --output .pact/bin/pact
+
+                set -- \
+                  --pacticipant "$PACTICIPANT" \
+                  --version "$PACTICIPANT_VERSION" \
+                  --environment "$DEPLOYED_ENVIRONMENT" \
+                  --output json
+                [ -z "$APPLICATION_INSTANCE" ] || \
+                  set -- "$@" --application-instance "$APPLICATION_INSTANCE"
+                .pact/bin/pact broker record-deployment "$@" \
+                  > "$REPORTS/record-deployment.json"
+                cat "$REPORTS/record-deployment.json"
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+    infrastructure:
+      type: KubernetesDirect
+      spec:
+        connectorRef: <+input>
+        namespace: <+input>.default(paypal-contract-lower)
+        automountServiceAccountToken: false
+        nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        os: Linux

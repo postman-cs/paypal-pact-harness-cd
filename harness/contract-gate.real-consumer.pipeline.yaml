@@ -12,6 +12,7 @@ pipeline:
     ci:
       codebase:
         connectorRef: <+input>   # git connector to THIS repo (carries the bundle)
+        repoName: paypal-pact-harness-cd
         build: <+input>
   variables:
     - name: CONSUMER_COLLECTION_UID
@@ -44,17 +45,32 @@ pipeline:
           execution:
             steps:
               - step:
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  type: Run
+                  spec:
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+              - step:
                   name: Pull Postman artifacts (CLI-first) + build the pact
                   identifier: pull_and_pact
                   type: Run
                   spec:
-                    image: node:24-bookworm-slim
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
-                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_api_key")>
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                     command: |
                       set -eu
-                      npm install --global postman-cli@1.44.0
+                      export HOME="$PWD/.ci-home"
+                      mkdir -p "$HOME"
+                      npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                      export PATH="$PWD/.postman-cli/bin:$PATH"
                       postman login --with-api-key "$POSTMAN_API_KEY"
                       node tools/pact-harness/scripts/postman/pull-artifacts.mjs \
                         --collection-uid "<+pipeline.variables.CONSUMER_COLLECTION_UID>" \
@@ -84,12 +100,21 @@ pipeline:
                   identifier: record_verification
                   type: Run
                   spec:
-                    image: node:20
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
                     shell: Sh
                     envVariables:
                       LEDGER_GIT_TOKEN: <+secrets.getValue("postman_cs_github_pat")>
                     command: |
-                      git clone --depth 1 "https://x-access-token:${LEDGER_GIT_TOKEN}@<+pipeline.variables.LEDGER_REPO>" .ledger
+                      ASKPASS="$(mktemp)"
+                      trap 'rm -f "$ASKPASS"' EXIT
+                      printf '%s\n' '#!/bin/sh' \
+                        'case "$1" in' \
+                        '  *Username*) printf "%s\\n" x-access-token ;;' \
+                        '  *) printf "%s\\n" "$LEDGER_GIT_TOKEN" ;;' \
+                        'esac' > "$ASKPASS"
+                      chmod 700 "$ASKPASS"
+                      export GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0
+                      git clone --depth 1 "https://<+pipeline.variables.LEDGER_REPO>" .ledger
                       node tools/pact-harness/pact-harness.mjs record-verification \
                         --ledger .ledger --oas .local/provider-oas.yaml --pact .local/consumer.pact.json \
                         --policy config/contract-policy.json \
@@ -104,7 +129,7 @@ pipeline:
                   identifier: fleet_can_i_deploy
                   type: Run
                   spec:
-                    image: node:20
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
                     shell: Sh
                     command: |
                       node tools/pact-harness/pact-harness.mjs can-i-deploy \

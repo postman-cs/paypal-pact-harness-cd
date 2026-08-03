@@ -12,15 +12,18 @@ suite alone is not end-to-end evidence.
 | Compare an application with a selected subset of a spec | The subset selector is applied to both route sets. It supports path prefixes, methods, explicit operations, and exclusions. |
 | One-to-many and many-to-many application/spec relationships | `config/contract-topology.json` stores named relationship edges, subset, policy, and exception register. Validation tests exercise a 2×2 graph. Instantiate one modular stage per edge. |
 | Contract testing is modular inside an existing Harness pipeline | `harness/stages/consumer-contract-gate.yaml` is one importable `stage:` object. It does not own PayPal triggers, deployment, approval, or promotion. |
-| Consumer-driven direction | Consumer-owned Pact, OAS, or Postman examples are normalized to Pact and checked against the provider OAS. This is static BDC, not a claim of full Pact CDC; see `docs/CONSUMER-DRIVEN.md`. |
+| Consumer-driven direction | The existing consumer-owned Pact/OAS/Postman static BDC remains the design preflight. Separate stages publish executable consumer-generated pacts, perform official provider verification with states/selectors/pending/WIP, gate deployability, and record successful deployments in an OSS Broker. |
 | First end-to-end validation is lower-environment only | The Harness stage rejects an environment other than `lower`. The demo wrapper and Kubernetes namespace are explicitly labeled lower. |
-| Postman modules: synchronization, contract testing, mismatch detection | Postman remains the artifact and execution plane; this bundle adds consumer contract/schema verification, while the exact Postman-CS comparator provides bidirectional mismatch detection. |
+| Postman modules: synchronization, contract testing, mismatch detection | Postman remains the API system of engagement: both OAS contracts come from declared Postman workspaces, Collections provide behavioral cases, Postman CLI executes lower/smoke suites, and the exact Postman-CS comparator provides bidirectional mismatch detection. Pact is limited to the consumer-code contract matrix. |
 | Orders is the complex demo API | The executable proof selects all nine Orders v2 operations. It is a demo contract, not a claim about a PayPal production service. |
 | PayPal testENV implements; Varun is primary technical contact | Ownership metadata names PayPal testENV and Varun. Jason is not named as the current owner. |
 | Spring Boot wrapper | `demo/orders-spring` uses Java 21 and Spring Boot, exposes all nine selected operations, Actuator mappings, generated OpenAPI, health probes, and bearer authentication. It is vanilla Spring because PayPal's private wrapper is outside this POC's supplied inputs. |
 | Harness CI stages run on Kubernetes | The complete lower pipeline runs the Spring wrapper and gate together in an ephemeral `KubernetesDirect` pod on the Hetzner K3s cluster. The drop-in stage also supports a persistent private `paypal-contract-lower` namespace and ClusterIP service. |
-| Postman CLI wherever practical | CI installs exact `postman-cli@1.44.0`. It runs positive and negative lower-environment cases with JSON/JUnit reporters and publishes Cloud run history. Raw API use is limited to collection export and standalone collection upsert, for which the CLI has no direct v2.1 collection primitive. |
+| Postman CLI wherever practical | CI installs exact `postman-cli@1.45.0`. It runs positive and negative lower-environment cases with JSON/JUnit reporters and publishes Cloud run history. The documented Postman API retrieves Spec Hub definitions and proves both Spec IDs belong to their declared workspace; credentials remain Harness secret references. |
+| Pull OAS on both sides from Postman | `postman-oas-preflight.yaml` retrieves consumer and provider definitions, validates OAS 2/3, fails a workspace/spec mismatch, and writes a timestamped SHA-256 provenance manifest before static BDC. |
+| Official open-source Pact lifecycle | Pact CLI v0.10.7 is release-URL, byte-count, and SHA-256 locked. Consumer publication, provider verification, `can-i-deploy`, and `record-deployment` are separate Harness stage objects with the correct ownership boundaries. |
 | Dependencies come from real Postman-CS | Build time fetches `postman-cs/paypal-harness-postman-stages` at the full commit and SHA-256 in `postman-cs.lock.json`; the portable bundle vendors that verified file. |
+| Harness always runs the intended Postman-CS checkout | Complete pipeline codebases fix `repoName=paypal-pact-harness-cd`. Their first step fails unless `origin` is `github.com/postman-cs/paypal-pact-harness-cd`, `HEAD` equals Harness `<+codebase.commitSha>`, and the portable CLI comparator provenance and digest match the lock. |
 
 ## Closed design questions
 
@@ -40,7 +43,7 @@ suite alone is not end-to-end evidence.
 
 ## Required proof sequence
 
-1. Local: 74 engine, topology, schema, security, route, configuration,
+1. Local: 92 engine, topology, schema, security, route, configuration,
    quick-start, packaging, exception, retry, and supply-chain tests pass.
 2. Packed CLI: extract the `.tgz` outside the repository and run the complete gate
    without `npm install`.

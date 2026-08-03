@@ -25,6 +25,10 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      - name: Attest source and committed portable CLI
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/ci/attest-harness-source.mjs
       - name: Install development dependencies
         run: npm ci
       - name: Run engine and topology tests
@@ -187,7 +191,7 @@ jobs:
             --json-out .contract-reports/generated-openapi-route-contract.json \
             --junit-out .contract-reports/generated-openapi-route-contract.xml
       - name: Install the exact Postman CLI release
-        run: npm install --global postman-cli@1.44.0
+        run: npm install --global postman-cli@1.45.0
       - name: Exercise positive and negative cases with Postman CLI
         shell: bash
         env:

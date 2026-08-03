@@ -52,7 +52,9 @@ independently.
 ## 3. Add the existing Harness stage
 
 Import `harness/stages/consumer-contract-gate.yaml` immediately before the
-existing promotion stage. The import has five meaningful inputs:
+existing promotion stage. Use a repository-scoped GitHub connector whose URL is
+exactly `https://github.com/postman-cs/paypal-pact-harness-cd.git`. The import has
+five meaningful inputs:
 
 - codebase connector;
 - Kubernetes connector and namespace;
@@ -62,11 +64,13 @@ existing promotion stage. The import has five meaningful inputs:
 
 The contract, subset, policy, exceptions, and report location stay in the single
 versioned JSON profile. Harness injects credentials from secrets and runs the
-same `verify` command in Kubernetes.
+same `verify` command in Kubernetes. Its first step verifies the full checkout
+identity and Harness commit SHA, then validates the portable CLI and locked
+Postman-CS comparator before any customer endpoint is called.
 
 ## Optional Postman runtime cases
 
-The Harness stage runs the committed collection with Postman CLI 1.44.0. For a
+The Harness stage runs the committed collection with Postman CLI 1.45.0. For a
 local run, set `postman.enabled` to `true`, set `postman.baseUrl`, and supply:
 
 ```bash
