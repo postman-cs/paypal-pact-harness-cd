@@ -43,7 +43,9 @@ export function vendorPactHarness({ source = SOURCE_ROOT, target, lock, verifier
     'tools/pact-harness', 'scripts/verify-vendored-bundle.mjs',
   ], { encoding: 'utf8' }).trim();
   if (dirty) {
-    throw new Error('refusing to vendor an uncommitted bundle or verifier; use a clean pinned checkout');
+    throw new Error(
+      `refusing to vendor an uncommitted bundle or verifier; use a clean pinned checkout\n${dirty}`,
+    );
   }
   const temporary = `${targetRoot}.part-${process.pid}`;
   rmSync(temporary, { recursive: true, force: true });
