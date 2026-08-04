@@ -92,5 +92,5 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
   assert.ok((source.match(/paypal_contract_demo_token/g) ?? []).length >= 3,
     'the lower provider, static gate, and official verifier must share the demo credential');
   assert.doesNotMatch(source, /paypal_pact_provider_bearer_token/);
-  assert.match(source, /production consumer\n# repositories must publish pacts created by executable tests/);
+  assert.match(source, /production consumer\r?\n# repositories must publish pacts created by executable tests/);
 });
