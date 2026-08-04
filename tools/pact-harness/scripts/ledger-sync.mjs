@@ -41,15 +41,22 @@ function safeName(value, label, pattern) {
   return value;
 }
 
+function canonicalPath(value) {
+  const path = resolve(realpathSync(value));
+  return process.platform === 'win32'
+    ? path.replace(/^\\\\\?\\/, '').replaceAll('\\', '/').toLowerCase()
+    : path;
+}
+
 function dedicatedCheckout(input) {
   if (typeof input !== 'string' || !input.trim()) throw new Error('--dir is required');
   const target = resolve(input);
-  const current = realpathSync(process.cwd());
+  const current = canonicalPath(process.cwd());
   if (!existsSync(target) || !lstatSync(target).isDirectory() || lstatSync(target).isSymbolicLink()) {
     throw new Error('--dir must be an existing, non-symbolic-link directory');
   }
   const realTarget = realpathSync(target);
-  if (realTarget === current) {
+  if (canonicalPath(realTarget) === current) {
     throw new Error('--dir must identify a dedicated ledger checkout, not the current directory');
   }
   const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -57,7 +64,7 @@ function dedicatedCheckout(input) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
-  if (realpathSync(top) !== realTarget) {
+  if (canonicalPath(top) !== canonicalPath(realTarget)) {
     throw new Error('--dir must be the root of its own dedicated Git worktree');
   }
   return realTarget;
