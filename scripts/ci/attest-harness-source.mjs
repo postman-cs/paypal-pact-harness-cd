@@ -69,6 +69,17 @@ function git(workspace, ...args) {
   }
 }
 
+function gitOptional(workspace, ...args) {
+  try {
+    return execFileSync('git', ['-C', workspace, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 function readJson(path, label) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
@@ -85,9 +96,14 @@ function sha256(path) {
   }
 }
 
-export function attest({ workspace, expectedCommit, output }) {
+export function attest({ workspace, expectedCommit, sourceRepository, output }) {
   const checkout = resolve(workspace);
-  const actualRepository = canonicalRepository(git(checkout, 'remote', 'get-url', 'origin'));
+  const gitOrigin = gitOptional(checkout, 'remote', 'get-url', 'origin');
+  const ciCodebase = String(sourceRepository ?? '').trim();
+  if (!gitOrigin && !ciCodebase) {
+    fail('neither the Git origin nor CI codebase repository identity could be read');
+  }
+  const actualRepository = canonicalRepository(gitOrigin || ciCodebase);
   if (actualRepository !== TRUSTED_REPOSITORY) {
     fail(`expected ${TRUSTED_REPOSITORY}, received ${actualRepository}`);
   }
@@ -162,6 +178,7 @@ export function attest({ workspace, expectedCommit, output }) {
     schemaVersion: 1,
     status: 'pass',
     repository: actualRepository,
+    repositoryEvidence: gitOrigin ? 'git-origin' : 'ci-codebase',
     commit: actualCommit,
     portableBundle: {
       name: bundlePackage.name,
@@ -188,6 +205,14 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     const result = attest({
       workspace: arg('workspace', process.cwd()),
       expectedCommit: arg('expected-commit', process.env.EXPECTED_SOURCE_COMMIT),
+      sourceRepository: arg(
+        'source-repository',
+        process.env.SOURCE_REPOSITORY_URL ||
+          process.env.CI_REPO_LINK ||
+          process.env.DRONE_REPO_LINK ||
+          process.env.CI_REPO_REMOTE ||
+          process.env.DRONE_GIT_HTTP_URL,
+      ),
       output: arg('output', '.contract-reports/source-attestation.json'),
     });
     console.log(JSON.stringify(result, null, 2));

@@ -75,6 +75,7 @@ pipeline:
                     shell: Sh
                     envVariables:
                       EXPECTED_SOURCE_COMMIT: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
+                      SOURCE_REPOSITORY_URL: <+codebase.repoUrl>
                     command: |
                       set -eu
                       node scripts/ci/attest-harness-source.mjs \

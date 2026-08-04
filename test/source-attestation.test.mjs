@@ -59,9 +59,10 @@ function fixture(remote = 'https://github.com/postman-cs/paypal-pact-harness-cd.
   };
 }
 
-function run(root, expectedCommit) {
+function run(root, expectedCommit, env = {}) {
   return spawnSync(process.execPath, [SCRIPT, '--workspace', root, '--expected-commit', expectedCommit], {
     encoding: 'utf8',
+    env: { ...process.env, ...env },
   });
 }
 
@@ -79,6 +80,24 @@ test('source attestation accepts HTTPS and SSH checkouts and emits portable prov
     assert.equal(evidence.commit, commit);
     assert.equal(evidence.portableBundle.name, 'pact-harness-bundle');
   }
+});
+
+test('source attestation uses the Harness codebase identity when clone metadata has no origin', () => {
+  const { root, commit } = fixture();
+  git(root, 'remote', 'remove', 'origin');
+
+  const result = run(root, commit, {
+    SOURCE_REPOSITORY_URL: 'https://github.com/postman-cs/paypal-pact-harness-cd',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const evidence = JSON.parse(readFileSync(join(root, '.contract-reports', 'source-attestation.json')));
+  assert.equal(evidence.repositoryEvidence, 'ci-codebase');
+
+  const wrongRepository = run(root, commit, {
+    SOURCE_REPOSITORY_URL: 'https://github.com/paypal/paypal-pact-harness-cd',
+  });
+  assert.notEqual(wrongRepository.status, 0);
+  assert.match(wrongRepository.stderr, /expected github\.com\/postman-cs/);
 });
 
 test('source attestation rejects a wrong repository without echoing credentials', () => {
