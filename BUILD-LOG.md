@@ -25,22 +25,23 @@ and delivery guide. It is never a public CI or release asset.
 
 | Surface | Result | Evidence |
 | --- | --- | --- |
-| Last public `main` matrix before v0.6.5 hardening | PASS | [run 30891323552](https://github.com/postman-cs/paypal-pact-harness-cd/actions/runs/30891323552), commit `e855976f1e4d7ad0331657389883a094c69c289a` |
+| Public `main` matrix at the v0.6.5 release commit | PASS | [run 30895204320](https://github.com/postman-cs/paypal-pact-harness-cd/actions/runs/30895204320), exact commit `2633890ce06e29384ff8e63ade10156b2e676274` |
+| Independent `v0.6.5` tag matrix | PASS | [run 30895485327](https://github.com/postman-cs/paypal-pact-harness-cd/actions/runs/30895485327), tag resolved to exact commit `2633890ce06e29384ff8e63ade10156b2e676274` |
 | Local v0.6.5 release-candidate gate | PASS | 195/195 tests plus topology/fixture checks, downstream adoption, portable bundle build/package, clean extraction, customer-kit integrity/tamper cases, and adversarial security tests |
-| Operating systems | PASS on last public matrix | Ubuntu 24.04, macOS 14, and Windows Server 2022 with Node 20 |
+| Operating systems | PASS on the exact release tag | Ubuntu 24.04, macOS 14, and Windows Server 2022 with Node 20 |
 | Spring lower proof | PASS | Digest-pinned Maven/Java wrapper, implementation routes, generated OpenAPI, positive/negative Postman cases, schema drift, and rogue-route rejection |
-| Security scanners | PASS on equivalent reviewed tree | Wiz data, IaC, SAST, secret, software-management, and vulnerability checks passed on [PR #7](https://github.com/postman-cs/paypal-pact-harness-cd/pull/7) head `261b29d…`; its Git tree is content-identical to merge commit `e855976…` |
+| Security scanners | PASS on the reviewed v0.6.5 change | Wiz data, IaC, secret, software-management, and vulnerability checks passed on [PR #8](https://github.com/postman-cs/paypal-pact-harness-cd/pull/8); Wiz SAST reported neutral/skipped rather than failure. The Contract gate passed on the PR head and merge commit. |
 | Credentialed Postman integration | PASS on earlier commit | [run 30866354686](https://github.com/postman-cs/paypal-pact-harness-cd/actions/runs/30866354686), commit `f4690e3…`: live workspace assets plus provider Collection, 11 requests and 12 assertions. This proves the path, not a production customer acceptance. |
-| Harness supplied Orders demonstration | PASS three consecutive times on `v0.6.4` | [Build 26](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/3iHpgvD1RqGIQ5zFqQ6R3w/pipeline), [Build 27](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/YWtM2eHQQsKlq6PhI6YNSw/pipeline), and [Build 28](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/doxFoZu1QVu55-7k4t-lGw/pipeline) attested exact commit `6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97`; each completed 1/1 stages successfully. Build 28 is the canonical latest of that set. Harness links require account access. |
+| Harness supplied Orders demonstration | PASS three consecutive times on `v0.6.5` | [Build 29](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/LD4h9jNFTziYSx6-6MDy7w/pipeline), [Build 30](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/YuK_4Bu3TUWJQa2n2h8a_Q/pipeline), and [Build 31](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/1ZpMYnNjT66Qbetru3jNng/pipeline) attested exact commit `2633890ce06e29384ff8e63ade10156b2e676274`; all used input digest `d76424654abc381f2c331187934d0ff400e953a4c1a3f7ff2abde2f77845bfb0` and completed 1/1 stages successfully in 303, 296, and 292 seconds. Build 31 is the canonical latest. Harness links require account access. |
 | PayPal production CDC/customer acceptance | **NOT RUN — OUT OF SCOPE** | Requires real consumer-generated Pacts, the exact PayPal provider build, deterministic provider states, deployment, target-environment Postman smoke tests, and post-deployment recording |
 
-Builds 26–28 each passed checkout, source/portable-CLI attestation, Postman
+Builds 29–31 each passed checkout, source/portable-CLI attestation, Postman
 dual-OAS and static BDC, provider conformance, provider Collection execution,
 seeded consumer Pact publication, official provider verification, and a non-empty
 Broker `can-i-deploy` decision. They did not deploy or record a deployment.
 
-Historical Build 24 validated v0.6.3. Build 25 was an empty-input API probe and is
-excluded from acceptance evidence.
+Historical Build 24 validated v0.6.3, and Builds 26–28 validated v0.6.4. Build 25
+was an empty-input API probe and is excluded from acceptance evidence.
 
 CI-produced portable bundle: `pact-harness-bundle-0.6.5.tgz`, SHA-256
 `41d747326a25fb0787abd0542fe9065f7f8ffa7c89e76b89a17b37ca9a8b7fe1`.
