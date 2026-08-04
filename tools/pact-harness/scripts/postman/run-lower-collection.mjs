@@ -215,8 +215,11 @@ export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
   if (!json?.run || typeof json.run !== 'object' || Array.isArray(json.run)) {
     throw new Error('Postman JSON reporter is missing run evidence');
   }
-  if (!Array.isArray(json.run.failures)) {
-    throw new Error('Postman JSON reporter is missing run.failures');
+  // Postman CLI 1.45 omits run.failures on a clean execution and emits an
+  // array only when failures exist. Explicit counters plus JUnit below remain
+  // the independent, non-vacuous evidence contract.
+  if (json.run.failures !== undefined && !Array.isArray(json.run.failures)) {
+    throw new Error('Postman JSON reporter run.failures must be an array when present');
   }
   const requests = reporterStat(json.run.stats, 'requests');
   const assertions = reporterStat(json.run.stats, 'assertions');
@@ -226,7 +229,7 @@ export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
   if (assertions.total === 0) throw new Error('Postman execution ran zero assertions');
   if (assertions.failed > 0) throw new Error(`Postman execution reported ${assertions.failed} failed assertion(s)`);
   if (assertions.pending > 0) throw new Error(`Postman execution reported ${assertions.pending} skipped assertion(s)`);
-  if (json.run.failures.length > 0) {
+  if ((json.run.failures?.length ?? 0) > 0) {
     throw new Error(`Postman execution retained ${json.run.failures.length} failure record(s)`);
   }
 
