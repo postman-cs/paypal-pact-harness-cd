@@ -30,14 +30,24 @@ through an approved access-controlled channel with its adjacent SHA-256 receipt.
 | Operating systems | PASS | GitHub jobs passed on Ubuntu 24.04, macOS 14, and Windows Server 2022 with Node 20 |
 | Spring lower proof | PASS | Digest-pinned Maven/Java wrapper, implementation routes, generated OpenAPI, positive/negative Postman cases, drift, and rogue-route rejection |
 | Security scanners | PASS | Wiz data, IaC, SAST, secret, software-management, and vulnerability checks on the latest main run |
-| Live Postman workspace readback | PASS | Both declared workspaces, two OAS documents, two Collections, workspace membership, and all four canonical digests were revalidated; both static compatibility reports passed 2/2 interactions |
+| Read-only live Postman static recheck | PASS | From the post-release default branch, both declared workspaces, two OAS documents, two Collections, workspace membership, and all four canonical digests were revalidated; both static compatibility reports passed 2/2 interactions. This manual recheck did not execute the provider Collection. |
+| Credentialed Postman integration | PASS on earlier commit | [Run 30866354686](https://github.com/postman-cs/paypal-pact-harness-cd/actions/runs/30866354686) at `f4690e3ae719118e62890586a007c089b0ec744c` pulled the live workspace assets and executed the provider Collection against the Spring wrapper: 11 requests and 12 assertions passed. This proves the integration path, not the `v0.6.4` release. |
 | Harness end-to-end integration | PASS on release `v0.6.3` | [Build 24](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/GKx25SyeTBu3IamOCZNCcA/pipeline): GitHub checkout, Postman OAS pull, static/provider gates, provider Collection, Pact publication, official provider verification, and Broker `can-i-deploy` |
 | Harness `v0.6.4` acceptance | PENDING | Requires an authenticated Harness operator to submit the complete runtime Input Set. [Build 25](https://app.harness.io/ng/account/MqRO9-E1S3KCCbydo-lPPg/module/ci/orgs/default/projects/default_project/pipelines/paypal_postman_pact_broker_lower/executions/7U1r_Zi4QumsdFrXy4pwhw/pipeline) was an empty-input API probe and is excluded from acceptance evidence. |
 
 The GitHub workflow intentionally skips the live Postman job on ordinary pushes;
-the read-only Postman validation above was run separately with the approved service
-account. The Harness pipeline owns the provider Collection and Broker lifecycle
+the read-only Postman validation above was run separately with the configured
+Postman API key. The Harness pipeline owns the provider Collection and Broker lifecycle
 proof.
+
+Release bundle: `pact-harness-bundle-0.6.4.tgz`, SHA-256
+`73a542a6f6451e3c11f64432b827718efbdc11ec5779b59e5f37d0eacfa459b8`.
+
+`v0.6.4` source validation is complete. Credentialed Postman execution has been
+demonstrated on an earlier commit, and Harness end-to-end integration has been
+demonstrated on `v0.6.3`. Harness acceptance of `v0.6.4` remains pending until an
+authenticated execution supplies the complete runtime Input Set, attests the
+reviewed release commit, and completes every required stage.
 
 ## Canonical Postman evidence
 
