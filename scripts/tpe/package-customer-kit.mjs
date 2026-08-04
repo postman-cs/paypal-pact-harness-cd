@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -19,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import {
   PIPELINE_VARIABLES,
   SECRET_IDENTIFIERS,
+  renderHarnessPipeline,
   renderHarnessInputSet,
   validateHandoffConfig,
   verifyReleaseTag,
@@ -27,9 +29,40 @@ import {
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const SOURCE_REPOSITORY = 'https://github.com/postman-cs/paypal-pact-harness-cd.git';
 const MUTATING_TOOL_PATHS = new Set([
+  'scripts/ledger-sync.mjs',
   'scripts/postman/setup-workspace-simulation.mjs',
   'scripts/postman/sync-cloud-collection.mjs',
 ]);
+const CUSTOMER_TOOLKIT_FILES = [
+  'README.md',
+  'package.json',
+  'postman-cs.lock.json',
+  'paypal-contract-gate.mjs',
+  'contract-gate.mjs',
+  'pact-harness.mjs',
+  'src/bdc-verify.mjs',
+  'src/cli.mjs',
+  'src/contract-topology.mjs',
+  'src/ledger-store.mjs',
+  'src/lib/git-retry.mjs',
+  'src/lib/ledger.mjs',
+  'src/lib/load.mjs',
+  'src/lib/oas.mjs',
+  'src/lib/pact.mjs',
+  'src/lib/path-safety.mjs',
+  'src/lib/schema-validate.mjs',
+  'src/lib/subset.mjs',
+  'src/oas-audit.mjs',
+  'src/oas-diff.mjs',
+  'src/oas-to-pact.mjs',
+  'src/postman-to-pact.mjs',
+  'src/provider-verify.mjs',
+  'src/route-exceptions.mjs',
+  'src/tpe-cli.mjs',
+  'src/tpe-config.mjs',
+  'vendor/postman-cs/PROVENANCE.json',
+  'vendor/postman-cs/compare-routes.mjs',
+];
 const PRODUCTION_STAGES = [
   'postman-oas-preflight.yaml',
   'pact-consumer-publish.yaml',
@@ -65,7 +98,9 @@ function confinedExistingFile(rootDir, input, label) {
   if (!rel || rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
     throw new Error(`${label} must resolve inside the repository`);
   }
-  if (!existsSync(target) || !lstatSync(target).isFile()) throw new Error(`${label} does not exist: ${input}`);
+  if (!existsSync(target) || !lstatSync(target).isFile() || lstatSync(target).isSymbolicLink()) {
+    throw new Error(`${label} must be an existing non-symbolic-link file: ${input}`);
+  }
   const realRel = relative(realpathSync(rootDir), realpathSync(target));
   if (realRel === '..' || realRel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(realRel)) {
     throw new Error(`${label} resolves outside the repository`);
@@ -73,11 +108,29 @@ function confinedExistingFile(rootDir, input, label) {
   return target;
 }
 
+function isInside(base, target) {
+  const rel = relative(base, target);
+  return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`);
+}
+
+function rejectSymlinkedAncestors(base, target) {
+  const realBase = realpathSync(base);
+  let cursor = base;
+  for (const segment of relative(base, target).split(/[\\/]/).filter(Boolean)) {
+    cursor = join(cursor, segment);
+    if (!existsSync(cursor)) break;
+    if (lstatSync(cursor).isSymbolicLink()) throw new Error(`outDir has a symbolic-link ancestor: ${relative(base, cursor)}`);
+    if (!isInside(realBase, realpathSync(cursor))) throw new Error('outDir resolves outside .contract-handoff');
+    if (process.platform !== 'win32' && lstatSync(cursor).isDirectory()) chmodSync(cursor, 0o700);
+  }
+}
+
 function outputTarget(rootDir, input, { force, archive }) {
   if (typeof input !== 'string' || !input || isAbsolute(input)) throw new Error('outDir must be repository-relative');
   const base = resolve(rootDir, '.contract-handoff');
   if (existsSync(base) && lstatSync(base).isSymbolicLink()) throw new Error('.contract-handoff cannot be a symbolic link');
-  mkdirSync(base, { recursive: true });
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(base, 0o700);
   const realBaseRel = relative(realpathSync(rootDir), realpathSync(base));
   if (realBaseRel === '..' || realBaseRel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(realBaseRel)) {
     throw new Error('.contract-handoff resolves outside the repository');
@@ -87,15 +140,18 @@ function outputTarget(rootDir, input, { force, archive }) {
   if (!rel || rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
     throw new Error('outDir must be a dedicated directory under .contract-handoff');
   }
+  rejectSymlinkedAncestors(base, target);
   if (existsSync(target) && !force) {
     throw new Error(`${relative(rootDir, target)} already exists; pass --force to replace it`);
   }
   if (existsSync(target) && lstatSync(target).isSymbolicLink()) throw new Error('outDir cannot be a symbolic link');
   if (archive && !force) {
-    for (const artifact of [`${target}.tgz`, `${target}.tgz.sha256`]) {
+    for (const artifact of [`${target}.tgz`, `${target}.tgz.sha256`, `${target}.tgz.DELIVERY.md`]) {
       if (existsSync(artifact)) throw new Error(`${relative(rootDir, artifact)} already exists; pass --force to replace it`);
     }
   }
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  rejectSymlinkedAncestors(base, dirname(target));
   return target;
 }
 
@@ -117,11 +173,15 @@ function copyTree(source, destination, prefix = '') {
     const from = join(source, entry.name);
     const to = join(destination, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`refusing to package symbolic link: ${relativeName}`);
-    if (MUTATING_TOOL_PATHS.has(relativeName)) continue;
     if (entry.isDirectory()) copyTree(from, to, relativeName);
     else if (entry.isFile()) copy(from, to);
     else throw new Error(`unsupported toolkit entry: ${relativeName}`);
   }
+}
+
+function copyCustomerToolkit(source, destination) {
+  for (const file of CUSTOMER_TOOLKIT_FILES) copy(join(source, file), join(destination, file));
+  copyTree(join(source, 'vendor/yaml'), join(destination, 'vendor/yaml'));
 }
 
 function walk(directory, prefix = '') {
@@ -145,6 +205,36 @@ function fileInventory(rootDir) {
   });
 }
 
+function resolvedHandoffConfig(model) {
+  return {
+    schemaVersion: 1,
+    harness: {
+      orgIdentifier: model.harness.orgIdentifier,
+      projectIdentifier: model.harness.projectIdentifier,
+      inputSetName: model.harness.inputSetName,
+      inputSetIdentifier: model.harness.inputSetIdentifier,
+    },
+    release: {
+      sourceRef: model.release.sourceRef,
+      reviewedSourceCommit: model.release.reviewedSourceCommit,
+      consumerPactBranch: model.values.CONSUMER_PACT_BRANCH,
+      providerPactBranch: model.values.PROVIDER_PACT_BRANCH,
+    },
+    infrastructure: {
+      codebaseConnector: model.codebaseConnector,
+      containerRegistryConnector: model.values.CONTAINER_REGISTRY_CONNECTOR,
+      kubernetesConnector: model.values.KUBERNETES_CONNECTOR,
+      kubernetesNamespace: model.values.KUBERNETES_NAMESPACE,
+    },
+    broker: {
+      baseUrl: model.values.BROKER_BASE_URL,
+      includeWipPactsSince: model.values.INCLUDE_WIP_PACTS_SINCE,
+      targetEnvironment: model.values.TARGET_ENVIRONMENT,
+    },
+    postman: { binding: model.binding },
+  };
+}
+
 function startHere(model) {
   return `# PayPal Pact Harness — start here
 
@@ -157,33 +247,32 @@ Release: \`${model.release.sourceRef}\`
 
 Reviewed commit: \`${model.release.reviewedSourceCommit}\`
 
-## 1. Verify the delivery
+## 1. Run the verified local proof
 
 Requirements: Node.js 20 or newer. No package installation is required.
 
 \`\`\`bash
-node verify-kit.mjs
+node first-run.mjs
 \`\`\`
 
-The verifier rejects missing, added, or changed files; incomplete Harness inputs;
-incomplete Postman bindings; credential-shaped values; and cloud-mutating Postman
-administration scripts.
-
-## 2. Run the local proof
-
-\`\`\`bash
-node run-demo.mjs
-\`\`\`
+This first verifies the kit, then runs the local proof. The verifier rejects
+missing, added, or changed files; incomplete Harness inputs;
+incomplete Postman bindings; credential-shaped values; and files outside the
+reviewed, non-administrative toolkit capability allowlist.
 
 Expected result: \`[PASS] PayPal contract gate (lower)\`. JUnit, JSON, and a sealed
-evidence manifest are written only under \`demo-local/.contract-reports/\`.
+evidence manifest are written to the temporary workspace printed as \`[EVIDENCE]\`.
+The delivered kit itself can remain mounted read-only.
 
-## 3. Run the complete Harness demonstration
+## 2. Run the complete Harness demonstration
 
-1. Import \`demo/harness-pipeline.yaml\` into Harness project
-   \`${model.harness.orgIdentifier}/${model.harness.projectIdentifier}\`.
-2. Import \`demo/harness-input-set.yaml\` for pipeline
-   \`${model.harness.pipelineIdentifier}\`.
+1. In Harness project \`${model.harness.orgIdentifier}/${model.harness.projectIdentifier}\`,
+   choose **Pipelines → New Pipeline → Inline**, use identifier
+   \`${model.harness.pipelineIdentifier}\`, paste the complete contents of
+   \`demo/harness-pipeline.yaml\`, and save. Do not use **Import from Remote** unless
+   the file is first committed to a PayPal-approved private repository.
+2. Open **Input Sets → New Input Set → YAML**, paste the complete contents of
+   \`demo/harness-input-set.yaml\`, save, and confirm both generated identifiers.
 3. Confirm the three secret identifiers in \`demo/required-secrets.md\` exist.
 4. Confirm the network routes in \`demo/network-prerequisites.md\`.
 5. Execute the Input Set. Use \`demo/expected-first-run.md\` as the acceptance checklist.
@@ -191,7 +280,7 @@ evidence manifest are written only under \`demo-local/.contract-reports/\`.
 The demo uses seeded Orders contract evidence to prove the integration. It does not
 represent a PayPal production deployment or a real consumer team's generated Pact.
 
-## 4. Adopt the production lifecycle
+## 3. Adopt the production lifecycle
 
 Use only the modular templates under \`production/stages/\`. Their exact placement
 and ownership boundaries are in \`production/README.md\`. Consumer contract
@@ -208,7 +297,7 @@ target-environment Postman smoke gate succeed.
 | Postman identity/digest mismatch | Re-lock the approved workspace asset; do not bypass the check. |
 | Empty provider verification | Ensure real pacts and deterministic provider states executed. |
 | Empty or unknown \`can-i-deploy\` matrix | Fix Broker publication/verification metadata before promotion. |
-| Missing connector/namespace | Update the customer handoff config and regenerate the kit. |
+| Missing connector/namespace | Ask Postman for a regenerated confidential kit; do not edit integrity-protected files. |
 `;
 }
 
@@ -263,15 +352,24 @@ function networkPrerequisites(model) {
 
 The selected Harness delegate/runtime needs approved egress to:
 
-- \`github.com/postman-cs/paypal-pact-harness-cd\` for the immutable toolkit checkout;
+- \`github.com\` for Git checkout, with the Git connector restricted to
+  \`postman-cs/paypal-pact-harness-cd\`;
+- \`api.github.com\` if required by the selected Harness Git connector;
+- \`objects.githubusercontent.com\` and \`release-assets.githubusercontent.com\` for the digest-locked Pact CLI release;
+- \`registry.npmjs.org\` for the exact Postman CLI package used by this demonstration;
 - \`api.postman.com\` for the workspace-bound OAS and Collection snapshots;
 - \`${model.values.BROKER_BASE_URL}\` for the OSS Pact Broker lifecycle;
-- the customer container registry selected by \`${model.values.CONTAINER_REGISTRY_CONNECTOR}\`;
+- the registry endpoints resolved by \`${model.values.CONTAINER_REGISTRY_CONNECTOR}\`
+  for the pinned Node and Maven images;
 - the Kubernetes cluster/namespace selected by \`${model.values.KUBERNETES_CONNECTOR}\` / \`${model.values.KUBERNETES_NAMESPACE}\`;
 - the lower provider URL during behavioral and provider-verification stages.
 
 Corporate TLS inspection and private CAs must be configured in the approved runner
 or delegate trust store; disabling TLS verification is not supported.
+
+The Broker URL must be customer-owned and stable for the lifetime of the kit.
+Temporary tunnel URLs are permitted only for live demos and must not ship in a
+customer delivery.
 `;
 }
 
@@ -300,6 +398,11 @@ This kit does not grant a standalone open-source license to Postman-authored cod
 Use and distribution are governed by the applicable Postman/customer agreement.
 Third-party components and their licenses are listed in
 \`THIRD-PARTY-NOTICES.md\` and \`provenance/sbom.cdx.json\`.
+
+This configured archive contains customer-confidential operational metadata. Do
+not attach it to a public GitHub Release or place it in public object storage.
+Deliver the archive, checksum, and adjacent DELIVERY guide only through the
+approved access-controlled customer channel.
 `;
 }
 
@@ -356,17 +459,37 @@ function sbom(rootDir, model, generatedAt) {
 function archiveKit(output, { force }) {
   const archive = `${output}.tgz`;
   const checksum = `${archive}.sha256`;
-  for (const target of [archive, checksum]) {
+  const delivery = `${archive}.DELIVERY.md`;
+  for (const target of [archive, checksum, delivery]) {
     if (existsSync(target)) {
       if (!force) throw new Error(`${relative(ROOT, target)} already exists; pass --force to replace it`);
       rmSync(target, { force: true });
     }
   }
   run('tar', ['-czf', archive, '-C', dirname(output), basename(output)], { cwd: ROOT });
+  if (process.platform !== 'win32') chmodSync(archive, 0o600);
   const content = readFileSync(archive);
   const digest = sha256(content);
   writeFileSync(checksum, `${digest}  ${basename(archive)}\n`, { mode: 0o600 });
-  return { archive, checksum, bytes: content.length, sha256: digest };
+  const directory = basename(output);
+  writeFileSync(delivery, `# Deliver and open ${basename(archive)}\n\n` +
+    `Transfer this archive, its .sha256 file, and this guide through the approved access-controlled channel.\n\n` +
+    `The checksum detects corruption. Authenticity depends on the approved delivery channel. ` +
+    `Where policy requires signed provenance, verify the accompanying signature or attestation before extraction.\n\n` +
+    `## macOS\n\n\`\`\`bash\nshasum -a 256 -c ${basename(checksum)}\n` +
+    `tar -xzf ${basename(archive)}\ncd ${directory}\nnode first-run.mjs\n\`\`\`\n\n` +
+    `## Linux\n\n\`\`\`bash\nsha256sum -c ${basename(checksum)}\n` +
+    `tar -xzf ${basename(archive)}\ncd ${directory}\nnode first-run.mjs\n\`\`\`\n\n` +
+    `## Windows PowerShell\n\n\`\`\`powershell\n` +
+    `$expected = (Get-Content .\\${basename(checksum)}).Split()[0].ToLower()\n` +
+    `$actual = (Get-FileHash .\\${basename(archive)} -Algorithm SHA256).Hash.ToLower()\n` +
+    `if ($actual -ne $expected) { throw "SHA-256 mismatch" }\n` +
+    `tar -xzf .\\${basename(archive)}\n` +
+    `if ($LASTEXITCODE -ne 0) { throw "Archive extraction failed" }\n` +
+    `Set-Location .\\${directory}\nnode .\\first-run.mjs\n\`\`\`\n\n` +
+    `Windows requires a current PowerShell environment with \`tar\` and Node.js 20 or newer.\n`,
+  { mode: 0o600 });
+  return { archive, checksum, delivery, bytes: content.length, sha256: digest };
 }
 
 export function packageCustomerKit({
@@ -378,10 +501,11 @@ export function packageCustomerKit({
   allowDirty = false,
 } = {}) {
   const configFile = confinedExistingFile(rootDir, configPath, 'config');
+  if (process.platform !== 'win32') chmodSync(configFile, 0o600);
   const model = validateHandoffConfig(readJson(configFile, 'handoff config'), { rootDir });
   verifyReleaseTag(model, { rootDir });
   const project = readJson(join(rootDir, 'package.json'), 'package.json');
-  const kitName = `paypal-pact-harness-customer-kit-${model.release.sourceRef}`;
+  const kitName = `paypal-pact-harness-customer-confidential-kit-${model.release.sourceRef}`;
   const sourceCommit = run('git', ['rev-parse', 'HEAD'], { cwd: rootDir });
   const dirty = Boolean(run('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: rootDir }));
   if (dirty && !allowDirty) {
@@ -396,10 +520,11 @@ export function packageCustomerKit({
     write(join(output, 'START-HERE.md'), startHere(model));
     copy(join(rootDir, 'scripts/tpe/verify-customer-kit.mjs'), join(output, 'verify-kit.mjs'));
     copy(join(rootDir, 'scripts/tpe/run-customer-demo.mjs'), join(output, 'run-demo.mjs'));
+    copy(join(rootDir, 'scripts/tpe/first-customer-run.mjs'), join(output, 'first-run.mjs'));
     copy(join(rootDir, 'THIRD-PARTY.md'), join(output, 'THIRD-PARTY-NOTICES.md'));
     write(join(output, 'DISTRIBUTION-NOTICE.md'), distributionNotice());
 
-    copy(join(rootDir, 'harness/contract-gate.broker.pipeline.yaml'), join(output, 'demo/harness-pipeline.yaml'));
+    write(join(output, 'demo/harness-pipeline.yaml'), renderHarnessPipeline(model, { rootDir }));
     write(join(output, 'demo/harness-input-set.yaml'), renderHarnessInputSet(model));
     write(join(output, 'demo/postman-bindings.json'), `${JSON.stringify(model.binding, null, 2)}\n`);
     write(join(output, 'demo/required-secrets.md'), requiredSecrets());
@@ -411,7 +536,7 @@ export function packageCustomerKit({
       copy(join(rootDir, 'harness/stages', stage), join(output, 'production/stages', stage));
     }
 
-    copyTree(join(rootDir, 'tools/pact-harness'), join(output, 'toolkit'));
+    copyCustomerToolkit(join(rootDir, 'tools/pact-harness'), join(output, 'toolkit'));
     const demoFiles = [
       'paypal-contract-gate.config.json',
       'fixtures/paypal/checkout_orders_v2.json',
@@ -424,7 +549,8 @@ export function packageCustomerKit({
     ];
     for (const file of demoFiles) copy(join(rootDir, file), join(output, 'demo-local', file));
 
-    copy(configFile, join(output, 'provenance/customer-handoff-config.json'));
+    const handoffConfig = `${JSON.stringify(resolvedHandoffConfig(model), null, 2)}\n`;
+    write(join(output, 'provenance/customer-handoff-config.json'), handoffConfig);
     copy(join(rootDir, 'pact-cli.lock.json'), join(output, 'provenance/pact-cli.lock.json'));
     copy(join(rootDir, 'postman-cs.lock.json'), join(output, 'provenance/postman-cs.lock.json'));
     write(join(output, 'provenance/sbom.cdx.json'), `${JSON.stringify(sbom(rootDir, model, generatedAt), null, 2)}\n`);
@@ -451,6 +577,12 @@ export function packageCustomerKit({
       builderSource: { commit: sourceCommit, dirty },
       release: model.release,
       toolkitVersion: project.version,
+      handoffConfigSha256: sha256(handoffConfig),
+      postmanBindingSha256: sha256(`${JSON.stringify(model.binding)}\n`),
+      harness: {
+        orgIdentifier: model.harness.orgIdentifier,
+        projectIdentifier: model.harness.projectIdentifier,
+      },
       pipelineIdentifier: model.harness.pipelineIdentifier,
       pipelineVariables: PIPELINE_VARIABLES,
       requiredHarnessSecrets: SECRET_IDENTIFIERS,
@@ -460,6 +592,7 @@ export function packageCustomerKit({
     write(join(output, 'KIT-MANIFEST.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
     const verify = run(process.execPath, [join(output, 'verify-kit.mjs')], { cwd: output });
+    outputTarget(rootDir, relative(rootDir, target), { force, archive });
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
     renameSync(output, target);
     const artifact = archive ? archiveKit(target, { force }) : null;

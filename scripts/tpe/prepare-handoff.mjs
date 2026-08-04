@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
+  chmodSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -134,6 +136,18 @@ function httpsUrl(value) {
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new Error('broker.baseUrl must be an HTTPS URL without credentials, query, or fragment');
   }
+  const temporaryTunnelHosts = [
+    'trycloudflare.com',
+    'ngrok.io',
+    'ngrok.app',
+    'ngrok-free.app',
+    'loca.lt',
+    'localtunnel.me',
+  ];
+  const host = url.hostname.toLowerCase();
+  if (temporaryTunnelHosts.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
+    throw new Error('broker.baseUrl must be customer-owned and stable; temporary tunnel URLs cannot ship in a handoff');
+  }
   return url.toString().replace(/\/$/, '');
 }
 
@@ -165,7 +179,9 @@ function confinedFile(rootDir, input, label) {
   if (!rel || rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
     throw new Error(`${label} must resolve inside the repository`);
   }
-  if (!existsSync(target)) throw new Error(`${label} does not exist: ${value}`);
+  if (!existsSync(target) || !lstatSync(target).isFile() || lstatSync(target).isSymbolicLink()) {
+    throw new Error(`${label} must be an existing non-symbolic-link file: ${value}`);
+  }
   const realRel = relative(realpathSync(rootDir), realpathSync(target));
   if (realRel === '..' || realRel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(realRel)) {
     throw new Error(`${label} resolves outside the repository`);
@@ -301,13 +317,36 @@ export function renderHarnessInputSet(model) {
   return `${lines.join('\n')}\n`;
 }
 
+export function renderHarnessPipeline(model, { rootDir = ROOT } = {}) {
+  const source = readFileSync(join(rootDir, 'harness/contract-gate.broker.pipeline.yaml'), 'utf8');
+  const orgLine = /^  orgIdentifier: .*$/m;
+  const projectLine = /^  projectIdentifier: .*$/m;
+  if (!orgLine.test(source) || !projectLine.test(source)) {
+    throw new Error('Harness pipeline has no renderable org/project scope');
+  }
+  return source
+    .replace(orgLine, `  orgIdentifier: ${model.harness.orgIdentifier}`)
+    .replace(projectLine, `  projectIdentifier: ${model.harness.projectIdentifier}`);
+}
+
 export function verifyReleaseTag(model, { rootDir = ROOT } = {}) {
+  const checkout = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: rootDir,
+    encoding: 'utf8',
+  });
+  if (checkout.status !== 0 || checkout.stdout.trim() !== 'true') {
+    throw new Error('release verification requires a full Git checkout; GitHub source ZIP/tar archives are unsupported');
+  }
   const target = `refs/tags/${model.release.sourceRef}^{commit}`;
   const result = spawnSync('git', ['rev-parse', '--verify', target], {
     cwd: rootDir,
     encoding: 'utf8',
   });
-  if (result.status !== 0) throw new Error(`release tag ${model.release.sourceRef} is not available locally`);
+  if (result.status !== 0) {
+    throw new Error(
+      `release tag ${model.release.sourceRef} is not available locally; run git fetch --tags --force and retry`,
+    );
+  }
   const actual = result.stdout.trim();
   if (actual !== model.release.reviewedSourceCommit) {
     throw new Error(
@@ -321,12 +360,25 @@ function dedicatedOutput(rootDir, input) {
   const value = text(input, 'outDir');
   if (isAbsolute(value)) throw new Error('outDir must be repository-relative');
   const base = resolve(rootDir, '.contract-handoff');
+  if (existsSync(base) && lstatSync(base).isSymbolicLink()) throw new Error('.contract-handoff cannot be a symbolic link');
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(base, 0o700);
   const target = resolve(rootDir, value);
   const rel = relative(base, target);
   if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
     throw new Error('outDir must stay under .contract-handoff');
   }
-  mkdirSync(target, { recursive: true });
+  let cursor = base;
+  for (const segment of rel.split(/[\\/]/).filter(Boolean)) {
+    cursor = join(cursor, segment);
+    if (!existsSync(cursor)) break;
+    if (lstatSync(cursor).isSymbolicLink()) {
+      throw new Error(`outDir has a symbolic-link ancestor: ${relative(base, cursor)}`);
+    }
+    if (process.platform !== 'win32' && lstatSync(cursor).isDirectory()) chmodSync(cursor, 0o700);
+  }
+  mkdirSync(target, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(target, 0o700);
   const realRel = relative(realpathSync(rootDir), realpathSync(target));
   if (realRel === '..' || realRel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(realRel)) {
     throw new Error('outDir resolves outside the repository');
@@ -345,10 +397,10 @@ function atomicWrite(path, content, { force }) {
   }
 }
 
-function checklist(model, inputSetPath) {
+function checklist(model, pipelinePath, inputSetPath) {
   return `# PayPal Pact Harness handoff\n\n` +
     `Generated from ${model.bindingSource}. No credentials are stored here.\n\n` +
-    `1. Import \`harness/contract-gate.broker.pipeline.yaml\` into Harness project ` +
+    `1. Import \`${pipelinePath}\` into Harness project ` +
     `\`${model.harness.orgIdentifier}/${model.harness.projectIdentifier}\`.\n` +
     `2. Import \`${inputSetPath}\` as an Input Set for ` +
     `\`${model.harness.pipelineIdentifier}\`.\n` +
@@ -368,15 +420,20 @@ export function prepareHandoff({
   check = false,
 } = {}) {
   const configFile = confinedFile(rootDir, configPath, 'config');
+  if (process.platform !== 'win32') chmodSync(configFile, 0o600);
   const model = validateHandoffConfig(JSON.parse(readFileSync(configFile, 'utf8')), { rootDir });
   verifyReleaseTag(model, { rootDir });
   const rendered = renderHarnessInputSet(model);
+  const renderedPipeline = renderHarnessPipeline(model, { rootDir });
   const inputSetName = `${model.harness.inputSetIdentifier}.input-set.yaml`;
+  const pipelineName = `${model.harness.pipelineIdentifier}.pipeline.yaml`;
   const relativeInputSet = join(outDir, inputSetName).replaceAll('\\', '/');
+  const relativePipeline = join(outDir, pipelineName).replaceAll('\\', '/');
   if (!check) {
     const output = dedicatedOutput(rootDir, outDir);
     const inputSetPath = join(output, inputSetName);
-    const targets = [inputSetPath, join(output, 'handoff-manifest.json'), join(output, 'README.md')];
+    const pipelinePath = join(output, pipelineName);
+    const targets = [pipelinePath, inputSetPath, join(output, 'handoff-manifest.json'), join(output, 'README.md')];
     if (!force) {
       const existing = targets.find((target) => existsSync(target));
       if (existing) throw new Error(`${relative(rootDir, existing)} already exists; pass --force to replace the handoff`);
@@ -395,16 +452,21 @@ export function prepareHandoff({
         path: relativeInputSet,
         sha256: sha256(rendered),
       },
+      pipeline: {
+        path: relativePipeline,
+        sha256: sha256(renderedPipeline),
+      },
     };
+    atomicWrite(pipelinePath, renderedPipeline, { force });
     atomicWrite(inputSetPath, rendered, { force });
     atomicWrite(join(output, 'handoff-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { force });
-    atomicWrite(join(output, 'README.md'), checklist(model, relativeInputSet), { force });
+    atomicWrite(join(output, 'README.md'), checklist(model, relativePipeline, relativeInputSet), { force });
   }
   console.log(`[ok] release ${model.release.sourceRef} -> ${model.release.reviewedSourceCommit}`);
   console.log(`[ok] Postman binding ${model.bindingSource}`);
   console.log(`[ok] Harness runtime coverage ${PIPELINE_VARIABLES.length}/${PIPELINE_VARIABLES.length}`);
-  console.log(check ? '[ready] handoff configuration is valid' : `[ready] import ${relativeInputSet}`);
-  return { model, rendered, relativeInputSet };
+  console.log(check ? '[ready] handoff configuration is valid' : `[ready] import ${relativePipeline} and ${relativeInputSet}`);
+  return { model, rendered, renderedPipeline, relativePipeline, relativeInputSet };
 }
 
 function parseArgs(argv) {
