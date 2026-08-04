@@ -129,6 +129,12 @@ jobs:
         with:
           node-version: "20"
           cache: npm
+      - name: Prove customer entry points before dependency installation
+        run: |
+          node paypal-contract-gate.mjs doctor
+          node paypal-contract-gate.mjs verify --clean
+          node tools/pact-harness/scripts/postman/lock-workspace-assets.mjs --help
+          node scripts/tpe/package-customer-kit.mjs --help
       - name: Install development dependencies
         run: npm ci
       - name: Test source, simple entry, and extracted release bundle
@@ -164,7 +170,10 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: live-postman-workspace-evidence
-          path: .contract-reports/postman-workspace-simulation/
+          path: |
+            .contract-reports/postman-workspace-simulation/evidence.json
+            .contract-reports/postman-workspace-simulation/consumer-oas-bdc.xml
+            .contract-reports/postman-workspace-simulation/consumer-collection-bdc.xml
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 30
@@ -303,7 +312,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish immutable wrapper image
+      - name: Build and publish commit-SHA-tagged wrapper image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: demo/orders-spring

@@ -1,15 +1,30 @@
 # PayPal TPE quick start
 
-This is the shortest supported path. It needs Git and Node 20 or newer. It does
-not need `npm install`, Docker, a Pact Broker, or a dedicated host.
+This is the shortest supported path. It needs Git and Node 20 or newer. Customer
+kit archive creation also needs `tar`. It does not need `npm install`, Docker, a
+Pact Broker, or a dedicated host. Official Pact lifecycle stages use Linux/Amd64;
+the static local proof also supports macOS and Windows.
 
 ## 1. Clone and prove the supplied lower profile
 
 ```bash
-git clone --branch v0.6.4 --single-branch \
+git clone --branch v0.6.5 --single-branch \
   https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
-test "$(git rev-parse HEAD)" = 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
+git rev-parse HEAD
+# Compare this full SHA with the Reviewed commit on the v0.6.5 release page.
+node paypal-contract-gate.mjs doctor
+node paypal-contract-gate.mjs verify --clean
+```
+
+PowerShell uses the same commands; compare the resolved commit explicitly:
+
+```powershell
+git clone --branch v0.6.5 --single-branch https://github.com/postman-cs/paypal-pact-harness-cd.git
+Set-Location paypal-pact-harness-cd
+$actual = (git rev-parse HEAD).Trim()
+Write-Host $actual
+# Compare $actual with the Reviewed commit on the v0.6.5 release page before execution.
 node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
@@ -47,6 +62,8 @@ export PAYPAL_CONTRACT_INVENTORY_ATTEMPTS="60"
 node paypal-contract-gate.mjs verify --clean
 ```
 
+PowerShell environment variables use `$env:NAME = "value"` instead of `export`.
+
 The Actuator and generated-OpenAPI URLs must be supplied together. Actuator is
 the authoritative route inventory; generated OpenAPI is cross-checked
 independently.
@@ -74,8 +91,8 @@ replace only the generation step's image with an approved digest-pinned language
 runtime; the publication and attestation steps stay unchanged.
 
 Harness reads credentials only from the documented project secrets. Use the
-protected `v0.6.4` toolkit tag and its reviewed full commit, or a later protected
-release; never bind a customer pipeline to a floating development branch.
+commit-pinned `v0.6.5` toolkit tag and its independently reviewed full commit, or
+a later commit-pinned release; never bind a customer pipeline to a floating branch.
 
 The contract, subset, policy, exceptions, and report location stay in the single
 versioned JSON profile. Harness injects credentials from secrets and runs the
@@ -98,6 +115,10 @@ connector, and namespace.
 The committed Postman binding already supplies the simulation workspace, Spec,
 Collection, and reviewed digest values. Generate the remaining Harness bindings
 from one customer-owned file:
+
+Use `npm run postman:lock-assets -- --help` to create the customer-owned Postman
+binding read-only from the two workspace/Spec pairs and provider Collection. It
+performs only Postman API GET requests and computes the canonical digests.
 
 ```bash
 mkdir -p .contract-handoff
@@ -137,6 +158,9 @@ export POSTMAN_API_KEY="..."
 node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
+
+On PowerShell, set these with `$env:CONTRACT_DEMO_TOKEN` and
+`$env:POSTMAN_API_KEY`.
 
 Tokens, passwords, and API keys belong only in the runner environment or Harness
 Secrets. The JSON profile contains no credential fields.

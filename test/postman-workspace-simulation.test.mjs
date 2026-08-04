@@ -21,6 +21,15 @@ import {
 } from '../scripts/postman/run-workspace-simulation.mjs';
 import { canonicalDocumentSha256 } from '../scripts/postman/spec-file.mjs';
 
+const PUBLIC_DEMO = {
+  classification: 'public-demo',
+  owner: 'postman-cs',
+  customerOwned: false,
+  approvedForPublicEvidence: true,
+  approvalReviewedAt: '2026-08-04',
+  approvalExpiresAt: '2099-12-31',
+};
+
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -41,6 +50,7 @@ test('live-shape dual-workspace pull produces two passing compatibility reports'
   const providerCollection = JSON.parse(readFileSync('fixtures/paypal/orders-lower.postman_collection.json', 'utf8'));
   writeFileSync(configPath, JSON.stringify({
     schemaVersion: 1,
+    ...PUBLIC_DEMO,
     consumer: {
       participant: 'orders-checkout-consumer',
       workspace: { id: 'consumer-workspace' },
@@ -112,6 +122,7 @@ test('workspace simulation rejects collection drift before changing report outpu
   const providerCollection = JSON.parse(readFileSync('fixtures/paypal/orders-lower.postman_collection.json', 'utf8'));
   writeFileSync(configPath, JSON.stringify({
     schemaVersion: 1,
+    ...PUBLIC_DEMO,
     consumer: {
       participant: 'orders-checkout-consumer',
       workspace: { id: 'consumer-workspace' },
@@ -150,6 +161,28 @@ test('workspace simulation rejects collection drift before changing report outpu
   );
   assert.equal(readFileSync(join(output, 'evidence.json'), 'utf8'), 'previous-evidence\n');
   assert.equal(existsSync(join(output, 'inputs')), false);
+});
+
+test('workspace simulation rejects unclassified or expired public bindings before API access', async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'postman-binding-classification-')));
+  const configPath = join(directory, 'bindings.json');
+  let calls = 0;
+  for (const metadata of [
+    {},
+    { ...PUBLIC_DEMO, approvalExpiresAt: '2020-01-01' },
+  ]) {
+    writeFileSync(configPath, JSON.stringify({ schemaVersion: 1, ...metadata }));
+    await assert.rejects(
+      runWorkspaceSimulation({
+        rootDir: directory,
+        configPath,
+        apiKey: 'test-key',
+        fetchImpl: async () => { calls += 1; return json({}); },
+      }),
+      /not approved|approval has expired/,
+    );
+  }
+  assert.equal(calls, 0);
 });
 
 test('workspace simulation output is confined to its dedicated report subtree', () => {

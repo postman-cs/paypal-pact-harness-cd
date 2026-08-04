@@ -10,7 +10,7 @@ or Postman cloud-provisioning tools to evaluate or adopt the capability.
 ```bash
 mkdir -p .contract-handoff
 cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
-# Replace every REPLACE placeholder, including the protected release tag and commit.
+# Replace every REPLACE placeholder, including the versioned release tag and independently reviewed commit.
 npm run handoff:doctor
 npm run customer:package
 ```

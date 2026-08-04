@@ -1,6 +1,6 @@
 {
   "name": "paypal-pact-harness-cd",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "private": true,
   "type": "module",
   "description": "Postman-first contract testing for PayPal: a self-contained static BDC gate plus Harness stages for the official open-source Pact consumer/provider lifecycle.",
@@ -18,6 +18,7 @@
     "postman:setup": "node tools/pact-harness/scripts/postman/setup-workspace-simulation.mjs",
     "postman:inspect": "node tools/pact-harness/scripts/postman/run-workspace-simulation.mjs",
     "postman:verify": "node tools/pact-harness/scripts/postman/run-workspace-simulation.mjs",
+    "postman:lock-assets": "node tools/pact-harness/scripts/postman/lock-workspace-assets.mjs",
     "handoff:doctor": "node scripts/tpe/prepare-handoff.mjs --check",
     "handoff:prepare": "node scripts/tpe/prepare-handoff.mjs",
     "customer:package": "node scripts/tpe/package-customer-kit.mjs",

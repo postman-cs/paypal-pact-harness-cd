@@ -5,6 +5,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setupWorkspaceSimulation } from '../scripts/postman/setup-workspace-simulation.mjs';
 
+const AUTHORIZATION = {
+  apply: true,
+  expectedOwnerId: 'owner-123',
+  owner: 'postman-cs',
+  classification: 'public-demo',
+  approvedForPublicEvidence: true,
+  approvalExpiresAt: '2099-12-31',
+  workspaceType: 'personal',
+};
+
 function response(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -19,6 +29,8 @@ function postmanState({ mutateExactSpec = false } = {}) {
     const method = options.method ?? 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
     state.calls.push({ method, path: url.pathname, query: Object.fromEntries(url.searchParams), body });
+
+    if (url.pathname === '/me' && method === 'GET') return response({ user: { id: 'owner-123' } });
 
     if (url.pathname === '/workspaces' && method === 'GET') return response({ workspaces: state.workspaces, meta: { nextCursor: null } });
     if (url.pathname === '/workspaces' && method === 'POST') {
@@ -95,10 +107,12 @@ test('dual-workspace setup creates then idempotently updates the same Postman as
   const outPath = join(directory, 'bindings.json');
   const { state, fetchImpl } = postmanState();
   const first = await setupWorkspaceSimulation({
+    ...AUTHORIZATION,
     rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl,
     now: () => new Date('2026-08-03T01:00:00.000Z'),
   });
   const second = await setupWorkspaceSimulation({
+    ...AUTHORIZATION,
     rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl,
     now: () => new Date('2026-08-03T02:00:00.000Z'),
   });
@@ -128,7 +142,7 @@ test('dual-workspace setup rejects duplicate exact-name workspaces without mutat
     { id: 'duplicate-2', name: 'PayPal Pact Simulation - Consumer' },
   );
   await assert.rejects(
-    setupWorkspaceSimulation({ rootDir: process.cwd(), outPath: join(mkdtempSync(join(tmpdir(), 'postman-duplicate-')), 'bindings.json'), apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl }),
+    setupWorkspaceSimulation({ ...AUTHORIZATION, rootDir: process.cwd(), outPath: join(mkdtempSync(join(tmpdir(), 'postman-duplicate-')), 'bindings.json'), apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl }),
     /multiple Postman workspaces named PayPal Pact Simulation - Consumer/,
   );
   assert.ok(state.calls.every((call) => call.method === 'GET'));
@@ -151,6 +165,7 @@ test('workspace setup validates both local asset pairs before the first mutation
   });
   await assert.rejects(
     setupWorkspaceSimulation({
+      ...AUTHORIZATION,
       rootDir: '/', outPath: join(directory, 'bindings.json'), apiKey: 'test-key',
       definitions: { consumer: definition(invalidSpec), provider: definition(validSpec) },
       fetchImpl: async () => { calls += 1; return response({}); },
@@ -164,17 +179,19 @@ test('a malformed successful workspace list never triggers a create', async () =
   const methods = [];
   await assert.rejects(
     setupWorkspaceSimulation({
+      ...AUTHORIZATION,
       rootDir: process.cwd(),
       outPath: join(mkdtempSync(join(tmpdir(), 'postman-malformed-list-')), 'bindings.json'),
       apiKey: 'test-key',
-      fetchImpl: async (_input, options = {}) => {
+      fetchImpl: async (input, options = {}) => {
         methods.push(options.method ?? 'GET');
+        if (new URL(input).pathname === '/me') return response({ user: { id: 'owner-123' } });
         return response({ unexpected: true });
       },
     }),
     /workspaces list response is malformed/,
   );
-  assert.deepEqual(methods, ['GET']);
+  assert.deepEqual(methods, ['GET', 'GET']);
 });
 
 test('workspace setup verifies exact ROOT content and rejects Postman round-trip drift', async () => {
@@ -183,6 +200,7 @@ test('workspace setup verifies exact ROOT content and rejects Postman round-trip
   const { state, fetchImpl } = postmanState({ mutateExactSpec: true });
   await assert.rejects(
     setupWorkspaceSimulation({
+      ...AUTHORIZATION,
       rootDir: process.cwd(), outPath, apiKey: 'test-key', fetchImpl,
     }),
     /consumer specification canonical digest drift/,
@@ -190,4 +208,32 @@ test('workspace setup verifies exact ROOT content and rejects Postman round-trip
   assert.equal(state.collections.length, 0);
   assert.equal(state.specs.length, 1);
   assert.throws(() => readFileSync(outPath), /ENOENT/);
+});
+
+test('workspace setup requires explicit apply and verifies owner before mutation', async () => {
+  let calls = 0;
+  await assert.rejects(
+    setupWorkspaceSimulation({
+      rootDir: process.cwd(),
+      outPath: join(mkdtempSync(join(tmpdir(), 'postman-no-apply-')), 'bindings.json'),
+      apiKey: 'test-key',
+      fetchImpl: async () => { calls += 1; return response({}); },
+    }),
+    /pass --apply/,
+  );
+  assert.equal(calls, 0);
+
+  const { state, fetchImpl } = postmanState();
+  await assert.rejects(
+    setupWorkspaceSimulation({
+      ...AUTHORIZATION,
+      expectedOwnerId: 'wrong-owner',
+      rootDir: process.cwd(),
+      outPath: join(mkdtempSync(join(tmpdir(), 'postman-wrong-owner-')), 'bindings.json'),
+      apiKey: 'test-key',
+      fetchImpl,
+    }),
+    /does not match expected owner/,
+  );
+  assert.deepEqual(state.calls.map(({ method, path }) => ({ method, path })), [{ method: 'GET', path: '/me' }]);
 });

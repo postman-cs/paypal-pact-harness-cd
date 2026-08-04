@@ -123,7 +123,10 @@ function reportResult(result, args, { asGate }) {
       console.log(`  ✗ ${i.description}`);
       for (const f of i.failures) console.log(`      - ${f.check}: ${f.detail}`);
     }
-    if (asGate) console.log(result.ok ? 'can-i-deploy: YES' : 'can-i-deploy: NO');
+    if (asGate) {
+      console.log(`[DEMO] static compatibility: ${result.ok ? 'PASS' : 'FAIL'}`);
+      console.log('This is not a Pact Broker can-i-deploy decision.');
+    }
   }
   process.exit(result.ok ? 0 : 1);
 }
@@ -203,7 +206,8 @@ function cmdProviderVerify(args) {
       console.log(`  ${c.deployable ? '✓' : '✗'} ${c.consumer}`);
       for (const r of c.reasons) console.log(`      - ${r}`);
     }
-    console.log(pv.deployable ? 'can-i-deploy: YES' : 'can-i-deploy: NO');
+    console.log(`[DEMO] static provider compatibility: ${pv.deployable ? 'PASS' : 'FAIL'}`);
+    console.log('This is not a Pact Broker can-i-deploy decision.');
   }
   process.exit(pv.deployable ? 0 : 1);
 }

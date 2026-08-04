@@ -8,23 +8,23 @@ uses Harness's native `GitClone` step for the additional
 work. Use the vendored flow below only when that connector-based read is not
 available.
 
-## 1. Acquire an immutable toolkit revision
+## 1. Acquire a commit-pinned toolkit revision
 
-Clone the protected toolkit release and verify the full commit supplied by
+Clone the versioned toolkit release and verify the full commit supplied by
 Postman. Do not use a floating branch in a customer pipeline.
 
 ```bash
-git clone --branch v0.6.4 --single-branch \
+git clone --branch v0.6.5 --single-branch \
   https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
-test "$(git rev-parse HEAD)" = 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
+git rev-parse HEAD # compare with the Reviewed commit on the v0.6.5 release page
 node scripts/ci/attest-harness-source.mjs \
-  --expected-commit 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
+  --expected-commit <REVIEWED_V0_6_5_COMMIT>
 ```
 
 The default branch is the maintained onboarding surface. Customer pipeline runtime
-bindings should use a signed or protected release tag and its independently
-reviewed full commit.
+bindings must use a versioned tag and its independently reviewed full commit. The
+full commit is the authoritative identity; a moved tag fails closed.
 
 ## 2. Vendor the portable bundle into the customer repository
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -22,6 +23,7 @@ import {
   renderHarnessInputSet,
   renderHarnessPipeline,
   validateHandoffConfig,
+  verifyReleaseCheckout,
   verifyReleaseTag,
 } from '../scripts/tpe/prepare-handoff.mjs';
 
@@ -49,7 +51,8 @@ function config() {
       kubernetesNamespace: 'paypal-contract-lower',
     },
     broker: {
-      baseUrl: 'https://pact-broker.example.test',
+      baseUrl: 'https://pact-broker.paypal.com',
+      approvedHostname: 'pact-broker.paypal.com',
       includeWipPactsSince: '2026-07-04',
       targetEnvironment: 'lower',
     },
@@ -103,6 +106,7 @@ test('handoff preparation is all-or-nothing unless replacement is explicit', () 
         rootDir: ROOT,
         configPath: `${relativeOutput}/config.json`,
         outDir: relativeOutput,
+        allowSourceMismatch: true,
       }),
       /already exists/,
     );
@@ -150,6 +154,7 @@ test('handoff preparation rejects symbolic-link output ancestors', { skip: proce
         rootDir: ROOT,
         configPath: relative(ROOT, join(parent, 'config.json')),
         outDir: relative(ROOT, join(parent, 'linked', 'output')),
+        allowSourceMismatch: true,
       }),
       /symbolic-link ancestor/,
     );
@@ -166,9 +171,13 @@ test('default handoff output writes a customer-scoped pipeline and Input Set in 
   try {
     const clone = spawnSync('git', ['clone', '--quiet', '--no-hardlinks', ROOT, checkout], { encoding: 'utf8' });
     assert.equal(clone.status, 0, clone.stderr || clone.stdout);
+    copyFileSync(
+      join(ROOT, 'config/postman-workspace-simulation.json'),
+      join(checkout, 'config/postman-workspace-simulation.json'),
+    );
     mkdirSync(join(checkout, '.contract-handoff'), { recursive: true });
     writeFileSync(join(checkout, '.contract-handoff/config.json'), `${JSON.stringify(config())}\n`);
-    const result = prepareHandoff({ rootDir: checkout });
+    const result = prepareHandoff({ rootDir: checkout, allowSourceMismatch: true });
     assert.equal(existsSync(join(checkout, result.relativePipeline)), true);
     assert.equal(existsSync(join(checkout, result.relativeInputSet)), true);
     const pipeline = YAML.parse(readFileSync(join(checkout, result.relativePipeline), 'utf8')).pipeline;
@@ -190,7 +199,29 @@ test('handoff renderer fails closed on placeholders, moved tags, and unsafe cust
 
   const temporaryTunnel = config();
   temporaryTunnel.broker.baseUrl = 'https://customer-demo.trycloudflare.com';
+  temporaryTunnel.broker.approvedHostname = 'customer-demo.trycloudflare.com';
   assert.throws(() => validateHandoffConfig(temporaryTunnel, { rootDir: ROOT }), /temporary tunnel URLs/);
+
+  for (const host of [
+    'customer-demo.trycloudflare.com.',
+    'localhost',
+    '127.0.0.1',
+    '169.254.10.20',
+    'pact-broker.example',
+    'single-label',
+  ]) {
+    const unsafe = config();
+    unsafe.broker.baseUrl = `https://${host}`;
+    unsafe.broker.approvedHostname = host.replace(/\.$/, '');
+    assert.throws(
+      () => validateHandoffConfig(unsafe, { rootDir: ROOT }),
+      /trailing dot|stable DNS hostname|reserved IP space/,
+    );
+  }
+
+  const unapprovedHost = config();
+  unapprovedHost.broker.approvedHostname = 'other.paypal.com';
+  assert.throws(() => validateHandoffConfig(unapprovedHost, { rootDir: ROOT }), /must exactly match/);
 
   const credential = config();
   const unsafeBinding = JSON.parse(readFileSync(join(ROOT, credential.postman.bindingFile), 'utf8'));
@@ -198,7 +229,29 @@ test('handoff renderer fails closed on placeholders, moved tags, and unsafe cust
   credential.postman = { binding: unsafeBinding };
   assert.throws(() => validateHandoffConfig(credential, { rootDir: ROOT }), /forbidden credential field/);
 
+  const unclassified = config();
+  const unclassifiedBinding = JSON.parse(readFileSync(join(ROOT, unclassified.postman.bindingFile), 'utf8'));
+  delete unclassifiedBinding.owner;
+  unclassified.postman = { binding: unclassifiedBinding };
+  assert.throws(() => validateHandoffConfig(unclassified, { rootDir: ROOT }), /binding\.owner is required/);
+
+  const falseCustomerOwnership = config();
+  const customerBinding = JSON.parse(readFileSync(join(ROOT, falseCustomerOwnership.postman.bindingFile), 'utf8'));
+  customerBinding.classification = 'customer-owned Postman asset binding';
+  customerBinding.owner = 'paypal-tpe';
+  customerBinding.customerOwned = false;
+  falseCustomerOwnership.postman = { binding: customerBinding };
+  assert.throws(() => validateHandoffConfig(falseCustomerOwnership, { rootDir: ROOT }), /customerOwned=true/);
+
   const moved = validateHandoffConfig(config(), { rootDir: ROOT });
   moved.release.reviewedSourceCommit = '0'.repeat(40);
   assert.throws(() => verifyReleaseTag(moved, { rootDir: ROOT }), /resolves to/);
+});
+
+test('handoff preparation rejects a checkout that does not equal the reviewed release', () => {
+  const model = validateHandoffConfig(config(), { rootDir: ROOT });
+  assert.throws(
+    () => verifyReleaseCheckout(model, { rootDir: ROOT }),
+    /does not match reviewed release commit/,
+  );
 });

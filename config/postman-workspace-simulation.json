@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "reconciledAt": "2026-08-04T02:06:24.859Z",
   "apiBase": "https://api.postman.com",
+  "classification": "public-demo",
+  "owner": "postman-cs",
+  "customerOwned": false,
+  "approvedForPublicEvidence": true,
+  "approvalReviewedAt": "2026-08-04",
+  "approvalExpiresAt": "2027-08-04",
   "consumer": {
     "participant": "orders-checkout-consumer",
     "workspace": {
