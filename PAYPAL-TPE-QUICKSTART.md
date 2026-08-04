@@ -72,7 +72,7 @@ replace only the generation step's image with an approved digest-pinned language
 runtime; the publication and attestation steps stay unchanged.
 
 Harness reads credentials only from the documented project secrets. Use the
-protected `v0.6.3` toolkit tag and its reviewed full commit, or a later protected
+protected `v0.6.4` toolkit tag and its reviewed full commit, or a later protected
 release; never bind a customer pipeline to a floating development branch.
 
 The contract, subset, policy, exceptions, and report location stay in the single
