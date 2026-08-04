@@ -82,6 +82,25 @@ export function resolveWorkspaceSimulationOutput(rootDir, outDir) {
   });
 }
 
+export function validatePublicDemoBinding(config, { now = () => new Date() } = {}) {
+  if (
+    config.classification !== 'public-demo' || config.owner !== 'postman-cs' ||
+    config.customerOwned !== false || config.approvedForPublicEvidence !== true
+  ) {
+    throw new Error('Postman simulation binding is not approved as a postman-cs public-demo asset');
+  }
+  for (const field of ['approvalReviewedAt', 'approvalExpiresAt']) {
+    if (typeof config[field] !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(config[field]) ||
+        Number.isNaN(Date.parse(`${config[field]}T00:00:00Z`))) {
+      throw new Error(`${field} must be an ISO date (YYYY-MM-DD)`);
+    }
+  }
+  if (Date.parse(`${config.approvalExpiresAt}T23:59:59Z`) < now().getTime()) {
+    throw new Error('Postman public-demo evidence approval has expired');
+  }
+  return config;
+}
+
 export async function runWorkspaceSimulation({
   rootDir = process.cwd(),
   configPath = 'config/postman-workspace-simulation.json',
@@ -93,6 +112,7 @@ export async function runWorkspaceSimulation({
   if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
   const base = validatePostmanApiBase(apiBase);
   const config = JSON.parse(readFileSync(resolve(rootDir, configPath), 'utf8'));
+  validatePublicDemoBinding(config);
   for (const role of ['consumer', 'provider']) {
     if (!config[role]?.workspace?.id || !config[role]?.spec?.id || !config[role]?.collection?.uid) {
       throw new Error(`${role} workspace, specification, and collection bindings are required`);
@@ -184,9 +204,15 @@ export async function runWorkspaceSimulation({
       status: 'not-run',
       reason: 'run the provider Collection against the candidate service in the runtime gate',
     },
-    oasProvenance: oas.manifestPath,
+    oas: oas.artifacts.map(({ path, ...artifact }) => artifact),
     collections,
-    reports: ['consumer-oas-bdc.json', 'consumer-oas-bdc.xml', 'consumer-collection-bdc.json', 'consumer-collection-bdc.xml'],
+    reports: [
+      'consumer-oas-bdc.json',
+      'consumer-collection-bdc.json',
+    ].map((name) => ({
+      name,
+      summary: JSON.parse(readFileSync(resolve(output, name), 'utf8')).summary,
+    })),
   };
   writeFileSync(resolve(output, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
   return evidence;

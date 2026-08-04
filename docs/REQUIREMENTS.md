@@ -43,14 +43,14 @@ suite alone is not end-to-end evidence.
 
 ## Required proof sequence
 
-1. Local: 92 engine, topology, schema, security, route, configuration,
-   quick-start, packaging, exception, retry, and supply-chain tests pass.
+1. Local: the complete engine, topology, schema, security, route, configuration,
+   quick-start, packaging, exception, retry, and supply-chain suite passes.
 2. Packed CLI: extract the `.tgz` outside the repository and run the complete gate
    without `npm install`.
 3. GitHub: build/test Spring, start it with a secret, collect Actuator and generated
    OpenAPI inventories, run the complete gate, run Postman CLI positive/negative
    checks, prove drift and rogue routes block, upload evidence, and publish an
-   immutable image.
+   commit-SHA-tagged image with provenance and SBOM; deployment consumers pin its OCI digest.
 4. Harness Cloud: run the identical bundle and fail-closed proofs with JUnit.
 5. Harness Kubernetes: start the authenticated Spring wrapper as a Background step
    and run the complete gate in the same ephemeral KubernetesDirect pod. The

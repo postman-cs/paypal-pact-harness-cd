@@ -1,9 +1,11 @@
 {
   "schemaVersion": 1,
   "classification": "customer-owned Postman asset binding template",
+  "owner": "REPLACE_WITH_CUSTOMER_ASSET_OWNER",
+  "customerOwned": true,
   "apiBase": "https://api.postman.com",
   "consumer": {
-    "participant": "REPLACE_WITH_CONSUMER_PACTICIPANT",
+    "participant": "REPLACE_WITH_CONSUMER_PARTICIPANT",
     "workspace": {
       "id": "REPLACE_WITH_CONSUMER_WORKSPACE_ID",
       "name": "REPLACE_WITH_CONSUMER_WORKSPACE_NAME"
@@ -16,7 +18,7 @@
     }
   },
   "provider": {
-    "participant": "REPLACE_WITH_PROVIDER_PACTICIPANT",
+    "participant": "REPLACE_WITH_PROVIDER_PARTICIPANT",
     "workspace": {
       "id": "REPLACE_WITH_PROVIDER_WORKSPACE_ID",
       "name": "REPLACE_WITH_PROVIDER_WORKSPACE_NAME"

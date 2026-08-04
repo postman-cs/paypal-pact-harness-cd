@@ -7,7 +7,7 @@
     "inputSetIdentifier": "paypal_pact_broker_lower"
   },
   "release": {
-    "sourceRef": "REPLACE_WITH_PROTECTED_RELEASE_TAG",
+    "sourceRef": "REPLACE_WITH_VERSIONED_RELEASE_TAG",
     "reviewedSourceCommit": "REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT",
     "consumerPactBranch": "main",
     "providerPactBranch": "main"
@@ -20,6 +20,7 @@
   },
   "broker": {
     "baseUrl": "REPLACE_WITH_HTTPS_PACT_BROKER_URL",
+    "approvedHostname": "REPLACE_WITH_EXACT_PACT_BROKER_HOSTNAME",
     "includeWipPactsSince": "2026-07-04",
     "targetEnvironment": "lower"
   },
@@ -27,9 +28,11 @@
     "binding": {
       "schemaVersion": 1,
       "classification": "customer-owned Postman asset binding",
+      "owner": "REPLACE_WITH_CUSTOMER_ASSET_OWNER",
+      "customerOwned": true,
       "apiBase": "https://api.postman.com",
       "consumer": {
-        "participant": "REPLACE_WITH_CONSUMER_PACTICIPANT",
+        "participant": "REPLACE_WITH_CONSUMER_PARTICIPANT",
         "workspace": {
           "id": "REPLACE_WITH_CONSUMER_WORKSPACE_ID",
           "name": "REPLACE_WITH_CONSUMER_WORKSPACE_NAME"
@@ -42,7 +45,7 @@
         }
       },
       "provider": {
-        "participant": "REPLACE_WITH_PROVIDER_PACTICIPANT",
+        "participant": "REPLACE_WITH_PROVIDER_PARTICIPANT",
         "workspace": {
           "id": "REPLACE_WITH_PROVIDER_WORKSPACE_ID",
           "name": "REPLACE_WITH_PROVIDER_WORKSPACE_NAME"

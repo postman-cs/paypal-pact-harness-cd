@@ -23,6 +23,7 @@ import {
   renderHarnessPipeline,
   renderHarnessInputSet,
   validateHandoffConfig,
+  verifyReleaseCheckout,
   verifyReleaseTag,
 } from './prepare-handoff.mjs';
 
@@ -228,6 +229,7 @@ function resolvedHandoffConfig(model) {
     },
     broker: {
       baseUrl: model.values.BROKER_BASE_URL,
+      approvedHostname: new URL(model.values.BROKER_BASE_URL).hostname,
       includeWipPactsSince: model.values.INCLUDE_WIP_PACTS_SINCE,
       targetEnvironment: model.values.TARGET_ENVIRONMENT,
     },
@@ -499,11 +501,13 @@ export function packageCustomerKit({
   force = false,
   archive = true,
   allowDirty = false,
+  allowSourceMismatch = false,
 } = {}) {
   const configFile = confinedExistingFile(rootDir, configPath, 'config');
   if (process.platform !== 'win32') chmodSync(configFile, 0o600);
   const model = validateHandoffConfig(readJson(configFile, 'handoff config'), { rootDir });
   verifyReleaseTag(model, { rootDir });
+  verifyReleaseCheckout(model, { rootDir, allowSourceMismatch });
   const project = readJson(join(rootDir, 'package.json'), 'package.json');
   const kitName = `paypal-pact-harness-customer-confidential-kit-${model.release.sourceRef}`;
   const sourceCommit = run('git', ['rev-parse', 'HEAD'], { cwd: rootDir });

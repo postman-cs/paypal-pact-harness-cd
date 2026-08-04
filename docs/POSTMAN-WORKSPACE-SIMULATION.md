@@ -16,12 +16,19 @@ without modifying Postman.
 
 ```sh
 export POSTMAN_API_KEY='use-a-team-or-service-account-key'
-npm run postman:seed-demo # mutating and idempotent
+npm run postman:seed-demo -- --apply \
+  --owner-id '<authenticated-postman-owner-id>' \
+  --owner postman-cs --classification public-demo \
+  --approved-for-public-evidence --approval-expires 2027-08-04 \
+  --team-id '<approved-team-id>' --maintenance-mode
 npm run postman:inspect   # read-only verification
 ```
 
-The default is a team workspace. For an individual API key that isn't operating
-in a team context, use `npm run postman:seed-demo -- --workspace-type personal`.
+The seeder refuses to mutate without `--apply`, verifies `/me` against the exact
+expected owner ID before any POST/PATCH, requires an explicit public-demo approval
+window, and requires `--maintenance-mode` to rewrite the tracked binding. The
+default is a team workspace and requires its approved team ID. For an individual
+API key, add `--workspace-type personal` and omit `--team-id`.
 PayPal should keep the default and provision with its team/service-account key.
 The legacy `postman:setup` and `postman:verify` aliases remain available. All four
 commands execute the committed install-free bundle, so a customer clone does not
@@ -47,6 +54,10 @@ and digests; it never contains the Postman API key.
 Do not use those identities as a customer default. Customer handoffs start from
 `config/paypal-tpe-handoff.example.json`, whose inline Postman binding requires
 customer-owned workspace, Spec, Collection, and canonical-digest values.
+Create that binding without changing Postman by running
+`npm run postman:lock-assets -- --help`; the command uses only GET requests,
+verifies each workspace relationship, and writes under ignored
+`.contract-handoff/` only when `--out` is supplied.
 
 For Harness, map the generated IDs to `CONSUMER_WORKSPACE_ID`,
 `CONSUMER_SPEC_ID`, `PROVIDER_WORKSPACE_ID`, and `PROVIDER_SPEC_ID`. Use the

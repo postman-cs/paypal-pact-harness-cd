@@ -44,7 +44,8 @@ function config() {
       kubernetesNamespace: 'paypal-contract-lower',
     },
     broker: {
-      baseUrl: 'https://pact-broker.example.test',
+      baseUrl: 'https://pact-broker.paypal.com',
+      approvedHostname: 'pact-broker.paypal.com',
       includeWipPactsSince: '2026-07-04',
       targetEnvironment: 'lower',
     },
@@ -126,6 +127,7 @@ test('customer package is self-contained, verifiable, read-only, and runnable wi
       outDir: relative(ROOT, output),
       archive: true,
       allowDirty: true,
+      allowSourceMismatch: true,
     });
     assert.equal(result.manifest.classification, 'customer-confidential operational metadata');
     assert.equal(result.manifest.pipelineVariables.length, 18);
@@ -356,7 +358,7 @@ test('customer-facing template requires customer Harness and Postman ownership',
   const handoff = readFileSync(join(ROOT, 'config/paypal-tpe-handoff.example.json'), 'utf8');
   const binding = readFileSync(join(ROOT, 'config/postman-customer-binding.example.json'), 'utf8');
   assert.match(handoff, /REPLACE_WITH_HARNESS_ORG_IDENTIFIER/);
-  assert.match(handoff, /REPLACE_WITH_PROTECTED_RELEASE_TAG/);
+  assert.match(handoff, /REPLACE_WITH_VERSIONED_RELEASE_TAG/);
   assert.match(handoff, /REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT/);
   assert.match(handoff, /REPLACE_WITH_CONSUMER_WORKSPACE_ID/);
   assert.match(handoff, /REPLACE_WITH_PROVIDER_COLLECTION_UID/);
@@ -382,6 +384,7 @@ test('customer packaging rejects symbolic-link output ancestors', { skip: proces
         outDir: relative(ROOT, join(link, 'escaped-kit')),
         archive: false,
         allowDirty: true,
+        allowSourceMismatch: true,
       }),
       /symbolic-link ancestor/,
     );
@@ -389,6 +392,27 @@ test('customer packaging rejects symbolic-link output ancestors', { skip: proces
   } finally {
     rmSync(parent, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('customer packaging cannot label a newer checkout as an older reviewed release', () => {
+  const parent = join(ROOT, '.contract-handoff', `customer-kit-release-mismatch-${process.pid}-${Date.now()}`);
+  const configPath = join(parent, 'config.json');
+  mkdirSync(parent, { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config(), null, 2)}\n`);
+  try {
+    assert.throws(
+      () => packageCustomerKit({
+        rootDir: ROOT,
+        configPath: relative(ROOT, configPath),
+        outDir: relative(ROOT, join(parent, 'kit')),
+        archive: false,
+        allowDirty: true,
+      }),
+      /does not match reviewed release commit/,
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
   }
 });
 

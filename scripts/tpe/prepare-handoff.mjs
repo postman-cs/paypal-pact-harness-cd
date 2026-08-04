@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { isIP } from 'node:net';
 import {
   existsSync,
   chmodSync,
@@ -71,6 +72,13 @@ function rejectCredentialFields(value, label) {
   }
 }
 
+function unresolvedPlaceholders(value, prefix = '') {
+  if (typeof value === 'string') return /^REPLACE(?:_|$)/i.test(value) ? [prefix] : [];
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    unresolvedPlaceholders(child, prefix ? `${prefix}.${key}` : key));
+}
+
 function text(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required`);
   const result = value.trim();
@@ -98,7 +106,7 @@ function connectorRef(value, label) {
 function releaseTag(value) {
   const result = text(value, 'release.sourceRef');
   if (!/^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(result)) {
-    throw new Error('release.sourceRef must be an immutable semantic release tag such as v1.2.3');
+    throw new Error('release.sourceRef must be a semantic release tag such as v1.2.3');
   }
   return result;
 }
@@ -125,7 +133,31 @@ function kubernetesNamespace(value) {
   return result;
 }
 
-function httpsUrl(value) {
+function publicIpv4(host) {
+  const [a, b, c] = host.split('.').map(Number);
+  return !(
+    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113)
+  );
+}
+
+function publicIpv6(host) {
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return !(
+    normalized === '::' || normalized === '::1' ||
+    normalized.startsWith('fc') || normalized.startsWith('fd') ||
+    /^fe[89ab]/.test(normalized)
+  );
+}
+
+function httpsUrl(value, approvedHostname) {
   const result = text(value, 'broker.baseUrl');
   let url;
   try {
@@ -136,6 +168,9 @@ function httpsUrl(value) {
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new Error('broker.baseUrl must be an HTTPS URL without credentials, query, or fragment');
   }
+  if (url.hostname.endsWith('.')) {
+    throw new Error('broker.baseUrl hostname must not use a trailing dot');
+  }
   const temporaryTunnelHosts = [
     'trycloudflare.com',
     'ngrok.io',
@@ -144,9 +179,23 @@ function httpsUrl(value) {
     'loca.lt',
     'localtunnel.me',
   ];
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (temporaryTunnelHosts.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
-    throw new Error('broker.baseUrl must be customer-owned and stable; temporary tunnel URLs cannot ship in a handoff');
+    throw new Error('broker.baseUrl must use an operator-approved stable hostname; temporary tunnel URLs cannot ship in a handoff');
+  }
+  if (
+    host === 'localhost' || !host.includes('.') ||
+    ['.localhost', '.local', '.test', '.example', '.invalid'].some((suffix) => host.endsWith(suffix))
+  ) {
+    throw new Error('broker.baseUrl must use an operator-approved stable DNS hostname');
+  }
+  const ipVersion = isIP(host);
+  if ((ipVersion === 4 && !publicIpv4(host)) || (ipVersion === 6 && !publicIpv6(host))) {
+    throw new Error('broker.baseUrl must not use loopback, private, link-local, or reserved IP space');
+  }
+  const approved = text(approvedHostname, 'broker.approvedHostname').replace(/\.+$/, '').toLowerCase();
+  if (approved !== host) {
+    throw new Error(`broker.approvedHostname must exactly match broker.baseUrl hostname (${host})`);
   }
   return url.toString().replace(/\/$/, '');
 }
@@ -198,8 +247,34 @@ function approvedSpecDigest(spec, label) {
   return digest;
 }
 
+function validateBindingOwnership(binding) {
+  const classification = text(binding.classification, 'Postman binding.classification');
+  const owner = text(binding.owner, 'Postman binding.owner');
+  if (classification === 'public-demo') {
+    if (owner !== 'postman-cs' || binding.customerOwned !== false ||
+        binding.approvedForPublicEvidence !== true) {
+      throw new Error('public-demo Postman binding must be Postman-CS-owned, not customer-owned, and approved for public evidence');
+    }
+    const expires = Date.parse(`${binding.approvalExpiresAt}T23:59:59Z`);
+    if (typeof binding.approvalExpiresAt !== 'string' || Number.isNaN(expires) || expires < Date.now()) {
+      throw new Error('public-demo Postman binding approval is missing or expired');
+    }
+  } else if (classification.startsWith('customer-owned Postman asset binding')) {
+    if (binding.customerOwned !== true) {
+      throw new Error('customer Postman binding must explicitly declare customerOwned=true');
+    }
+  } else {
+    throw new Error('Postman binding classification must be public-demo or customer-owned Postman asset binding');
+  }
+  return { classification, owner };
+}
+
 export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
   const config = record(raw, 'handoff config');
+  const placeholders = unresolvedPlaceholders(config);
+  if (placeholders.length) {
+    throw new Error(`handoff config contains REPLACE placeholder(s): ${placeholders.sort().join(', ')}`);
+  }
   onlyKeys(config, ['schemaVersion', 'harness', 'release', 'infrastructure', 'broker', 'postman'], 'handoff config');
   if (config.schemaVersion !== 1) throw new Error('handoff config schemaVersion must be 1');
   const harness = record(config.harness, 'harness');
@@ -215,7 +290,7 @@ export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
     'kubernetesConnector',
     'kubernetesNamespace',
   ], 'infrastructure');
-  onlyKeys(broker, ['baseUrl', 'includeWipPactsSince', 'targetEnvironment'], 'broker');
+  onlyKeys(broker, ['baseUrl', 'approvedHostname', 'includeWipPactsSince', 'targetEnvironment'], 'broker');
   onlyKeys(postman, ['bindingFile', 'binding'], 'postman');
   if (Boolean(postman.bindingFile) === Boolean(postman.binding)) {
     throw new Error('postman must contain exactly one of bindingFile or binding');
@@ -227,6 +302,7 @@ export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
     ? record(postman.binding, 'Postman inline binding')
     : record(JSON.parse(readFileSync(bindingPath, 'utf8')), 'Postman binding file');
   rejectCredentialFields(binding, 'Postman binding');
+  validateBindingOwnership(binding);
   const consumer = record(binding.consumer, 'Postman consumer binding');
   const provider = record(binding.provider, 'Postman provider binding');
   const targetEnvironment = text(broker.targetEnvironment, 'broker.targetEnvironment');
@@ -239,7 +315,7 @@ export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
     ),
     KUBERNETES_CONNECTOR: connectorRef(infrastructure.kubernetesConnector, 'infrastructure.kubernetesConnector'),
     KUBERNETES_NAMESPACE: kubernetesNamespace(infrastructure.kubernetesNamespace),
-    BROKER_BASE_URL: httpsUrl(broker.baseUrl),
+    BROKER_BASE_URL: httpsUrl(broker.baseUrl, broker.approvedHostname),
     REVIEWED_SOURCE_COMMIT: commit(release.reviewedSourceCommit),
     CONSUMER_PACT_BRANCH: pactBranch(release.consumerPactBranch, 'release.consumerPactBranch'),
     PROVIDER_PACT_BRANCH: pactBranch(release.providerPactBranch, 'release.providerPactBranch'),
@@ -356,6 +432,21 @@ export function verifyReleaseTag(model, { rootDir = ROOT } = {}) {
   return actual;
 }
 
+export function verifyReleaseCheckout(model, { rootDir = ROOT, allowSourceMismatch = false } = {}) {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: rootDir, encoding: 'utf8' });
+  if (result.status !== 0 || !/^[a-f0-9]{40}$/.test(result.stdout.trim())) {
+    throw new Error('release checkout verification requires a full Git checkout');
+  }
+  const actual = result.stdout.trim();
+  if (actual !== model.release.reviewedSourceCommit && !allowSourceMismatch) {
+    throw new Error(
+      `current checkout ${actual} does not match reviewed release commit ${model.release.reviewedSourceCommit}; ` +
+      `check out ${model.release.sourceRef} before preparing or packaging the handoff`,
+    );
+  }
+  return actual;
+}
+
 function dedicatedOutput(rootDir, input) {
   const value = text(input, 'outDir');
   if (isAbsolute(value)) throw new Error('outDir must be repository-relative');
@@ -387,7 +478,9 @@ function dedicatedOutput(rootDir, input) {
 }
 
 function atomicWrite(path, content, { force }) {
-  if (existsSync(path) && !force) throw new Error(`${relative(ROOT, path)} already exists; pass --force to replace it`);
+  if (existsSync(path) && !force) {
+    throw new Error(`${relative(ROOT, path)} already exists; rerun npm run handoff:prepare -- --force to replace it`);
+  }
   const temporary = `${path}.part-${process.pid}`;
   try {
     writeFileSync(temporary, content, { mode: 0o600 });
@@ -399,17 +492,19 @@ function atomicWrite(path, content, { force }) {
 
 function checklist(model, pipelinePath, inputSetPath) {
   return `# PayPal Pact Harness handoff\n\n` +
-    `Generated from ${model.bindingSource}. No credentials are stored here.\n\n` +
-    `1. Import \`${pipelinePath}\` into Harness project ` +
+    `Generated from ${model.bindingSource}. No credentials are stored here. ` +
+    `This directory is customer-confidential operational metadata; transfer it only through the approved private channel.\n\n` +
+    `1. In Harness, create/import an Inline Pipeline from the exact YAML in \`${pipelinePath}\` into project ` +
     `\`${model.harness.orgIdentifier}/${model.harness.projectIdentifier}\`.\n` +
-    `2. Import \`${inputSetPath}\` as an Input Set for ` +
+    `2. Create/import an Inline Input Set from the exact YAML in \`${inputSetPath}\` for ` +
     `\`${model.harness.pipelineIdentifier}\`.\n` +
     `3. Confirm these project secrets exist: ${SECRET_IDENTIFIERS.map((name) => `\`${name}\``).join(', ')}.\n` +
     `4. Run the pipeline with release \`${model.release.sourceRef}\`; source attestation must report ` +
     `\`${model.release.reviewedSourceCommit}\`.\n` +
     '5. Require Postman/OAS, provider verification, and a non-empty `can-i-deploy` decision before promotion.\n\n' +
     'The supplied integration proof does not deploy or record a deployment. Real service pipelines must run ' +
-    '`pact-record-deployment` only after deployment and target-environment Postman smoke tests succeed.\n';
+    '`pact-record-deployment` only after deployment and target-environment Postman smoke tests succeed.\n\n' +
+    'Do not use Import from Remote unless these files are first committed to an approved private customer repository.\n';
 }
 
 export function prepareHandoff({
@@ -418,11 +513,13 @@ export function prepareHandoff({
   outDir = '.contract-handoff',
   force = false,
   check = false,
+  allowSourceMismatch = false,
 } = {}) {
   const configFile = confinedFile(rootDir, configPath, 'config');
   if (process.platform !== 'win32') chmodSync(configFile, 0o600);
   const model = validateHandoffConfig(JSON.parse(readFileSync(configFile, 'utf8')), { rootDir });
   verifyReleaseTag(model, { rootDir });
+  verifyReleaseCheckout(model, { rootDir, allowSourceMismatch });
   const rendered = renderHarnessInputSet(model);
   const renderedPipeline = renderHarnessPipeline(model, { rootDir });
   const inputSetName = `${model.harness.inputSetIdentifier}.input-set.yaml`;
@@ -509,7 +606,15 @@ if (isMain) {
     else prepareHandoff(args);
   } catch (error) {
     console.error(`[FAIL] ${error.message}`);
-    console.error('Next: copy config/paypal-tpe-handoff.example.json to .contract-handoff/config.json and replace every REPLACE placeholder.');
+    if (/REPLACE placeholder/.test(error.message)) {
+      console.error('Next: replace every listed placeholder in .contract-handoff/config.json, then rerun.');
+    } else if (/already exists/.test(error.message)) {
+      console.error('Next: review the existing output, then rerun npm run handoff:prepare -- --force if replacement is intended.');
+    } else if (/does not match reviewed release commit/.test(error.message)) {
+      console.error('Next: check out the reviewed release tag and confirm HEAD equals its independently reviewed full commit.');
+    } else {
+      console.error('Next: correct the reported handoff configuration or checkout error, then rerun.');
+    }
     process.exitCode = 2;
   }
 }

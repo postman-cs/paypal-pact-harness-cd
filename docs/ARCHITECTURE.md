@@ -149,7 +149,7 @@ sequenceDiagram
   Git->>Bundle: Test, rebuild, verify postman-cs digest, package
   Bundle->>Bundle: Audit OAS and verify consumer schemas/examples
   Git->>Git: Prove schema drift and rogue routes fail closed
-  Git->>Git: Publish immutable wrapper image and retained evidence
+  Git->>Git: Publish commit-SHA-tagged wrapper image, SBOM, provenance, and retained evidence
 
   Harness->>Pod: Schedule modular lower-environment CI stage
   Pod->>App: Build and start authenticated Spring Background step

@@ -119,7 +119,7 @@ Every runtime stage under `harness/stages/` except the explicitly offline
 application repo remains the pipeline codebase. Bind these three stage inputs:
 
 - `harness_source_connector`: the read-only Postman-CS GitHub connector;
-- `harness_source_ref`: the approved immutable release tag supplied by Postman-CS;
+- `harness_source_ref`: the approved versioned release tag supplied by Postman-CS;
 - `harness_source_commit`: the exact full 40-character commit SHA expected at that ref.
 
 For these additional-clone steps, use an account-level GitHub connector whose

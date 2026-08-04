@@ -11,7 +11,7 @@ channel.
 
 | Customer handoff | Link |
 | --- | --- |
-| Immutable source release | [`v0.6.4`](https://github.com/postman-cs/paypal-pact-harness-cd/releases/tag/v0.6.4) |
+| Commit-pinned source release | [`v0.6.5`](https://github.com/postman-cs/paypal-pact-harness-cd/releases/tag/v0.6.5) |
 | Build and validation record | [`BUILD-LOG.md`](BUILD-LOG.md) |
 | Five-minute local proof | [`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md) |
 | Harness import instructions | [`harness/IMPORT.md`](harness/IMPORT.md) |
@@ -20,7 +20,9 @@ channel.
 
 ## PayPal TPE: start here
 
-Requirements: Git and Node 20 or newer.
+Requirements: Git, Node 20 or newer, and `tar` for customer-kit archives. The
+official Pact lifecycle stages run on Linux/Amd64; the install-free static gate
+runs on macOS, Linux, and Windows.
 
 | Goal | Path |
 | --- | --- |
@@ -29,10 +31,11 @@ Requirements: Git and Node 20 or newer.
 | Adopt production CDC | Add the five modular Pact stages to the consumer, provider, and deployment pipelines that own each event. |
 
 ```bash
-git clone --branch v0.6.4 --single-branch \
+git clone --branch v0.6.5 --single-branch \
   https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
-test "$(git rev-parse HEAD)" = 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
+git rev-parse HEAD
+# Before execution, compare this full SHA with the Reviewed commit on the v0.6.5 release page.
 node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
@@ -47,6 +50,20 @@ JSON, and checksums under `.contract-reports/`.
 For the complete Harness proof, one credential-free customer config now carries
 the Harness bindings and customer-owned Postman asset lock. It can generate either
 the 18-variable Input Set or a complete versioned customer kit:
+
+First, the read-only asset lock fetches the two customer-owned OAS documents and
+provider Collection, proves workspace membership, and computes the required
+canonical digests without changing Postman:
+
+```bash
+export POSTMAN_API_KEY="<approved-service-account-key>"
+npm run postman:lock-assets -- --owner paypal-tpe \
+  --consumer-participant checkout-consumer --consumer-workspace-id <id> --consumer-spec-id <id> \
+  --provider-participant paypal-orders --provider-workspace-id <id> --provider-spec-id <id> \
+  --provider-collection-uid <uid> --out .contract-handoff/postman-binding.json
+```
+
+Then create either handoff output:
 
 ```bash
 mkdir -p .contract-handoff
@@ -129,7 +146,8 @@ compares selected OAS routes to a live application inventory in both directions.
 Orders evidence, starts the real Spring Boot wrapper, gates authoritative
 `/actuator/mappings`, cross-checks generated `/v3/api-docs`, uses Postman CLI 1.45.0 for
 authenticated positive and negative cases, proves schema drift and rogue endpoints fail
-closed, uploads JUnit/JSON plus the packaged CLI, and publishes an immutable image.
+closed, uploads JUnit/JSON plus the packaged CLI, and publishes a commit-SHA-tagged
+image with provenance and an SBOM. Deployments should pin the resulting OCI digest.
 
 ## Harness stages and pipelines
 

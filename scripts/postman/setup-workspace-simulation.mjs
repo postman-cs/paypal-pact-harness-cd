@@ -44,6 +44,53 @@ function arg(name, fallback) {
   return index >= 0 ? process.argv[index + 1] : fallback;
 }
 
+function flag(name) {
+  return process.argv.includes(`--${name}`);
+}
+
+function isoDay(value, label) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+      Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new Error(`${label} must be an ISO date (YYYY-MM-DD)`);
+  }
+  return value;
+}
+
+function publicDemoAuthorization({
+  apply,
+  expectedOwnerId,
+  owner,
+  classification,
+  approvedForPublicEvidence,
+  approvalExpiresAt,
+  workspaceType,
+  teamId,
+  rootDir,
+  outPath,
+  maintenanceMode,
+  now,
+}) {
+  if (!apply) throw new Error('Postman setup is mutating; pass --apply after reviewing the target account and assets');
+  if (!/^[A-Za-z0-9_-]{3,200}$/.test(expectedOwnerId ?? '')) {
+    throw new Error('expectedOwnerId is required and contains invalid characters');
+  }
+  if (owner !== 'postman-cs' || classification !== 'public-demo' || approvedForPublicEvidence !== true) {
+    throw new Error('demo setup requires owner=postman-cs, classification=public-demo, and explicit public-evidence approval');
+  }
+  const expires = isoDay(approvalExpiresAt, 'approvalExpiresAt');
+  if (Date.parse(`${expires}T23:59:59Z`) < now().getTime()) {
+    throw new Error('approvalExpiresAt has expired; obtain a new public-evidence approval before mutation');
+  }
+  if (workspaceType === 'team' && !teamId) {
+    throw new Error('teamId is required when workspaceType=team');
+  }
+  const trackedBinding = resolve(rootDir, outPath) === resolve(rootDir, 'config/postman-workspace-simulation.json');
+  if (trackedBinding && !maintenanceMode) {
+    throw new Error('writing the tracked demo binding requires --maintenance-mode and code review');
+  }
+  return expires;
+}
+
 export async function requestJson(url, {
   apiKey,
   method = 'GET',
@@ -268,6 +315,13 @@ export async function setupWorkspaceSimulation({
   fetchImpl = fetch,
   definitions = DEFAULTS,
   now = () => new Date(),
+  apply = false,
+  expectedOwnerId = '',
+  owner = '',
+  classification = '',
+  approvedForPublicEvidence = false,
+  approvalExpiresAt = '',
+  maintenanceMode = false,
 } = {}) {
   if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
   if (!['team', 'personal', 'private'].includes(workspaceType)) {
@@ -276,9 +330,23 @@ export async function setupWorkspaceSimulation({
   if (teamId && !/^[A-Za-z0-9_-]{3,200}$/.test(teamId)) {
     throw new Error('teamId contains invalid characters');
   }
+  const expires = publicDemoAuthorization({
+    apply, expectedOwnerId, owner, classification, approvedForPublicEvidence,
+    approvalExpiresAt, workspaceType, teamId, rootDir, outPath, maintenanceMode, now,
+  });
   const base = validatePostmanApiBase(apiBase);
   const request = (url, options = {}) => requestJson(url, { apiKey, fetchImpl, ...options });
-  const result = { schemaVersion: 1, reconciledAt: now().toISOString(), apiBase: base.origin };
+  const result = {
+    schemaVersion: 1,
+    reconciledAt: now().toISOString(),
+    apiBase: base.origin,
+    classification,
+    owner,
+    customerOwned: false,
+    approvedForPublicEvidence: true,
+    approvalReviewedAt: now().toISOString().slice(0, 10),
+    approvalExpiresAt: expires,
+  };
 
   const prepared = {};
   for (const role of ['consumer', 'provider']) {
@@ -291,6 +359,12 @@ export async function setupWorkspaceSimulation({
     const specType = validateSpec(specDocument, role);
     validateCollection(collection, role);
     prepared[role] = { definition, specContent, collectionContent, specDocument, collection, specType };
+  }
+
+  const identity = await request(postmanApiUrl('/me', base));
+  const actualOwnerId = String(identity?.user?.id ?? identity?.id ?? '');
+  if (actualOwnerId !== String(expectedOwnerId)) {
+    throw new Error(`authenticated Postman owner ${actualOwnerId || '(missing)'} does not match expected owner ${expectedOwnerId}`);
   }
 
   for (const role of ['consumer', 'provider']) {
@@ -348,19 +422,34 @@ export async function setupWorkspaceSimulation({
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   try {
-    const output = await setupWorkspaceSimulation({
-      rootDir: arg('root', process.cwd()),
-      outPath: arg('out', 'config/postman-workspace-simulation.json'),
-      apiKey: process.env.POSTMAN_API_KEY,
-      apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
-      workspaceType: arg('workspace-type', process.env.POSTMAN_WORKSPACE_TYPE || 'team'),
-      teamId: arg('team-id', process.env.POSTMAN_TEAM_ID || ''),
-    });
-    for (const role of ['consumer', 'provider']) {
-      const item = output[role];
-      console.log(`[postman-setup] ${role} workspace=${item.workspace.id} (${item.workspace.action}) spec=${item.spec.id} (${item.spec.action}) collection=${item.collection.uid} (${item.collection.action})`);
+    if (flag('help') || process.argv.includes('-h')) {
+      console.log('Mutating Postman-CS public-demo setup. No mutation occurs without --apply.\n\n' +
+        'Required: --apply --owner-id ID --owner postman-cs --classification public-demo\n' +
+        '--approved-for-public-evidence --approval-expires YYYY-MM-DD.\n' +
+        'For team workspaces, pass --team-id. Writing the tracked binding also requires --maintenance-mode.');
+      process.exitCode = 0;
+    } else {
+      const output = await setupWorkspaceSimulation({
+        rootDir: arg('root', process.cwd()),
+        outPath: arg('out', 'config/postman-workspace-simulation.json'),
+        apiKey: process.env.POSTMAN_API_KEY,
+        apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
+        workspaceType: arg('workspace-type', process.env.POSTMAN_WORKSPACE_TYPE || 'team'),
+        teamId: arg('team-id', process.env.POSTMAN_TEAM_ID || ''),
+        apply: flag('apply'),
+        expectedOwnerId: arg('owner-id', process.env.POSTMAN_EXPECTED_OWNER_ID || ''),
+        owner: arg('owner', ''),
+        classification: arg('classification', ''),
+        approvedForPublicEvidence: flag('approved-for-public-evidence'),
+        approvalExpiresAt: arg('approval-expires', ''),
+        maintenanceMode: flag('maintenance-mode'),
+      });
+      for (const role of ['consumer', 'provider']) {
+        const item = output[role];
+        console.log(`[postman-setup] ${role} workspace=${item.workspace.id} (${item.workspace.action}) spec=${item.spec.id} (${item.spec.action}) collection=${item.collection.uid} (${item.collection.action})`);
+      }
+      console.log('[postman-setup] wrote approved, non-secret binding config/postman-workspace-simulation.json');
     }
-    console.log('[postman-setup] wrote non-secret binding config/postman-workspace-simulation.json');
   } catch (error) {
     console.error(`[FAIL] ${error.message}`);
     console.error('Next: export POSTMAN_API_KEY from the approved service account, then rerun npm run postman:seed-demo.');
