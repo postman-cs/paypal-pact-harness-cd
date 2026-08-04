@@ -59,13 +59,16 @@ Consumer response examples emit type matchers rather than brittle exact-value
 matches. The deep schema validator still enforces required properties, enum/const,
 formats, patterns, numeric/string/array constraints, and `additionalProperties`.
 
-## D8 — Postman CLI first
+## D8 — Postman Cloud source, sealed CLI execution
 
-Use exact Postman CLI 1.45.0 for login, collection execution, Cloud run history,
-and JSON/JUnit reporting. Use the documented Postman API for Spec Hub definitions,
-workspace-membership proof, collection export, and standalone collection upsert
-where the CLI does not expose the required primitive. Secrets are passed by the
-runner and never written into committed files.
+Use exact Postman CLI 1.45.0 for collection execution and JSON/JUnit reporting.
+Use the documented Postman API for Spec Hub definitions, workspace-membership
+proof, collection export, and standalone collection upsert where the CLI does not
+expose the required primitive. Before execution, the runner proves that the Cloud
+Collection belongs to the expected workspace, verifies its reviewed canonical
+SHA-256, writes a mode-`0600` local snapshot, and runs only that sealed snapshot.
+The PMAK is used only by the parent fetch process; neither it nor the application
+token is forwarded in the Postman CLI child environment.
 
 ## D9 — Actuator is authoritative
 

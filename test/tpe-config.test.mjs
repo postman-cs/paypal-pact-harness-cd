@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -70,7 +71,60 @@ test('input and report paths cannot be absolute or escape the repository', () =>
   assert.throws(() => validateTpeConfig(absolute, { root: ROOT, env: {} }), /repository-relative/);
   const report = clone();
   report.reports.directory = '../../tmp/reports';
-  assert.throws(() => validateTpeConfig(report, { root: ROOT, env: {} }), /escapes the repository root/);
+  assert.throws(
+    () => validateTpeConfig(report, { root: ROOT, env: {} }),
+    /must not contain path traversal components/,
+  );
+});
+
+test('report cleanup is confined to the dedicated .contract-reports subtree', () => {
+  for (const directory of ['.', 'src', 'fixtures']) {
+    const value = clone();
+    value.reports.directory = directory;
+    assert.throws(
+      () => validateTpeConfig(value, { root: ROOT, env: {} }),
+      /reports\.directory must be \.contract-reports or a child of that dedicated subtree/,
+    );
+  }
+
+  const traversal = clone();
+  traversal.reports.directory = '.contract-reports/team/../other';
+  assert.throws(
+    () => validateTpeConfig(traversal, { root: ROOT, env: {} }),
+    /must not contain path traversal components/,
+  );
+
+  const absolute = clone();
+  absolute.reports.directory = join(ROOT, '.contract-reports', 'absolute');
+  assert.throws(
+    () => validateTpeConfig(absolute, { root: ROOT, env: {} }),
+    /reports\.directory must be repository-relative/,
+  );
+
+  const valid = clone();
+  valid.reports.directory = '.contract-reports/tpe-safe';
+  assert.equal(
+    validateTpeConfig(valid, { root: ROOT, env: {} }).reports.directory.absolute,
+    join(ROOT, '.contract-reports', 'tpe-safe'),
+  );
+});
+
+test('report cleanup rejects symbolic-link destinations and parents', { skip: process.platform === 'win32' }, () => {
+  const reports = join(ROOT, '.contract-reports');
+  mkdirSync(reports, { recursive: true });
+  const directory = mkdtempSync(join(reports, 'tpe-report-symlink-'));
+  const link = join(directory, 'linked');
+  symlinkSync(join(ROOT, 'src'), link, 'dir');
+  try {
+    const value = clone();
+    value.reports.directory = `${directory.slice(ROOT.length + 1)}/linked/output`;
+    assert.throws(
+      () => validateTpeConfig(value, { root: ROOT, env: {} }),
+      /symbolic link or symbolic-link parent/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('symlinked inputs cannot escape the repository', { skip: process.platform === 'win32' }, () => {
@@ -132,4 +186,64 @@ test('Postman runtime checks require an explicit collection and base URL', () =>
   valid.postman.enabled = true;
   valid.postman.baseUrl = 'https://lower.example.test';
   assert.equal(validateTpeConfig(valid, { root: ROOT, env: {} }).postman.enabled, true);
+});
+
+test('Postman Cloud mode requires a workspace-bound canonical collection digest', () => {
+  const missingWorkspace = clone();
+  missingWorkspace.postman = {
+    enabled: true,
+    collection: '12345678-collection-id',
+    baseUrl: 'https://lower.example.test',
+    cloud: true,
+    workspaceId: '',
+    collectionSha256: 'a'.repeat(64),
+  };
+  assert.throws(
+    () => validateTpeConfig(missingWorkspace, { root: ROOT, env: {} }),
+    /postman\.workspaceId is required when postman\.cloud=true/,
+  );
+
+  const missingDigest = clone();
+  missingDigest.postman = {
+    ...missingWorkspace.postman,
+    workspaceId: 'workspace-id',
+    collectionSha256: '',
+  };
+  assert.throws(
+    () => validateTpeConfig(missingDigest, { root: ROOT, env: {} }),
+    /postman\.collectionSha256 is required when postman\.cloud=true/,
+  );
+
+  const uppercaseDigest = clone();
+  uppercaseDigest.postman = {
+    ...missingDigest.postman,
+    collectionSha256: 'A'.repeat(64),
+  };
+  assert.throws(
+    () => validateTpeConfig(uppercaseDigest, { root: ROOT, env: {} }),
+    /postman\.collectionSha256 is required when postman\.cloud=true/,
+  );
+});
+
+test('Postman Cloud workspace and digest can be supplied as runtime overrides', () => {
+  const value = clone();
+  value.postman = {
+    enabled: true,
+    collection: '',
+    baseUrl: '',
+    cloud: true,
+    workspaceId: '',
+    collectionSha256: '',
+  };
+  const config = validateTpeConfig(value, {
+    root: ROOT,
+    env: {
+      PAYPAL_CONTRACT_POSTMAN_COLLECTION: '12345678-collection-id',
+      PAYPAL_CONTRACT_APP_BASE_URL: 'https://lower.example.test',
+      PAYPAL_CONTRACT_POSTMAN_WORKSPACE_ID: 'workspace-id',
+      PAYPAL_CONTRACT_POSTMAN_COLLECTION_SHA256: 'b'.repeat(64),
+    },
+  });
+  assert.equal(config.postman.workspaceId, 'workspace-id');
+  assert.equal(config.postman.collectionSha256, 'b'.repeat(64));
 });

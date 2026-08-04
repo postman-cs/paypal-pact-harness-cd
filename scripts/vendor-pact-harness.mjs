@@ -8,6 +8,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attest, TRUSTED_REPOSITORY } from './ci/attest-harness-source.mjs';
 import { bundleDigest } from './verify-vendored-bundle.mjs';
+import {
+  assertNoSymbolicLinkComponents,
+  isPathInside,
+} from '../src/lib/path-safety.mjs';
 
 const SOURCE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -24,14 +28,34 @@ function requireSafeTarget(path, label) {
   return target;
 }
 
-export function vendorPactHarness({ source = SOURCE_ROOT, target, lock, verifier, expectedCommit }) {
-  const sourceRoot = resolve(source);
+export function validateVendorTargets({ target, lock, verifier, source = SOURCE_ROOT }) {
   const targetRoot = requireSafeTarget(target, '--target');
   const lockPath = requireSafeTarget(lock, '--lock');
   const verifierPath = requireSafeTarget(verifier, '--verifier');
-  if (lockPath.startsWith(`${targetRoot}/`) || lockPath.startsWith(`${targetRoot}\\`)) {
+  const sourceRoot = realpathSync(resolve(source));
+  if (new Set([targetRoot, lockPath, verifierPath]).size !== 3) {
+    throw new Error('--target, --lock, and --verifier must be distinct paths');
+  }
+  if (isPathInside(targetRoot, sourceRoot)) {
+    throw new Error('--target must not be the harness source or an ancestor of the harness source');
+  }
+  if (isPathInside(targetRoot, lockPath)) {
     throw new Error('--lock must be outside the vendored bundle so it cannot attest itself');
   }
+  if (isPathInside(targetRoot, verifierPath)) {
+    throw new Error('--verifier must be outside the vendored bundle so it remains independent');
+  }
+  assertNoSymbolicLinkComponents(targetRoot, '--target');
+  assertNoSymbolicLinkComponents(lockPath, '--lock');
+  assertNoSymbolicLinkComponents(verifierPath, '--verifier');
+  return { targetRoot, lockPath, verifierPath };
+}
+
+export function vendorPactHarness({ source = SOURCE_ROOT, target, lock, verifier, expectedCommit }) {
+  const sourceRoot = resolve(source);
+  const { targetRoot, lockPath, verifierPath } = validateVendorTargets({
+    target, lock, verifier, source: sourceRoot,
+  });
 
   const sourceAttestation = attest({
     workspace: sourceRoot,
@@ -43,11 +67,10 @@ export function vendorPactHarness({ source = SOURCE_ROOT, target, lock, verifier
     'tools/pact-harness', 'scripts/verify-vendored-bundle.mjs',
   ], { encoding: 'utf8' }).trim();
   if (dirty) {
-    throw new Error(
-      `refusing to vendor an uncommitted bundle or verifier; use a clean pinned checkout\n${dirty}`,
-    );
+    throw new Error('refusing to vendor an uncommitted bundle or verifier; use a clean pinned checkout');
   }
   const temporary = `${targetRoot}.part-${process.pid}`;
+  assertNoSymbolicLinkComponents(temporary, 'temporary vendor target');
   rmSync(temporary, { recursive: true, force: true });
   mkdirSync(dirname(targetRoot), { recursive: true });
   cpSync(join(sourceRoot, 'tools', 'pact-harness'), temporary, { recursive: true });
@@ -68,6 +91,7 @@ export function vendorPactHarness({ source = SOURCE_ROOT, target, lock, verifier
     },
   };
 
+  assertNoSymbolicLinkComponents(targetRoot, '--target');
   rmSync(targetRoot, { recursive: true, force: true });
   renameSync(temporary, targetRoot);
   mkdirSync(dirname(lockPath), { recursive: true });

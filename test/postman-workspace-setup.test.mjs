@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,7 +12,7 @@ function response(body, status = 200) {
   });
 }
 
-function postmanState() {
+function postmanState({ mutateExactSpec = false } = {}) {
   const state = { workspaces: [], specs: [], collections: [], calls: [] };
   const fetchImpl = async (input, options = {}) => {
     const url = new URL(input);
@@ -36,6 +36,7 @@ function postmanState() {
         name: body.name,
         content: body.files[0].content,
         path: body.files[0].path,
+        type: body.type,
       };
       state.specs.push(spec);
       return response(spec, 201);
@@ -46,6 +47,18 @@ function postmanState() {
       return response({ files: [{ path: spec.path, type: 'ROOT' }] });
     }
     const specFile = url.pathname.match(/^\/specs\/([^/]+)\/files\/(.+)$/);
+    if (specFile && method === 'GET') {
+      const spec = state.specs.find((entry) => entry.id === specFile[1]);
+      let content = spec.content;
+      if (mutateExactSpec) {
+        const document = JSON.parse(content);
+        document.info.version = `${document.info.version}-mutated`;
+        content = JSON.stringify(document);
+      }
+      return response({
+        id: `${spec.id}-root`, path: spec.path, type: 'ROOT', content,
+      });
+    }
     if (specFile && method === 'PATCH') {
       const spec = state.specs.find((entry) => entry.id === specFile[1]);
       spec.content = body.content;
@@ -63,6 +76,10 @@ function postmanState() {
       return response({ collection: { uid: entry.uid } }, 201);
     }
     const collection = url.pathname.match(/^\/collections\/(.+)$/);
+    if (collection && method === 'GET') {
+      const entry = state.collections.find((item) => item.uid === collection[1]);
+      return response({ collection: entry.collection });
+    }
     if (collection && method === 'PUT') {
       const entry = state.collections.find((item) => item.uid === collection[1]);
       entry.collection = body.collection;
@@ -78,11 +95,11 @@ test('dual-workspace setup creates then idempotently updates the same Postman as
   const outPath = join(directory, 'bindings.json');
   const { state, fetchImpl } = postmanState();
   const first = await setupWorkspaceSimulation({
-    rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://postman.test', fetchImpl,
+    rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl,
     now: () => new Date('2026-08-03T01:00:00.000Z'),
   });
   const second = await setupWorkspaceSimulation({
-    rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://postman.test', fetchImpl,
+    rootDir: process.cwd(), outPath, apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl,
     now: () => new Date('2026-08-03T02:00:00.000Z'),
   });
 
@@ -97,6 +114,9 @@ test('dual-workspace setup creates then idempotently updates the same Postman as
   assert.equal(second.consumer.spec.id, first.consumer.spec.id);
   assert.equal(second.consumer.collection.uid, first.consumer.collection.uid);
   assert.match(second.consumer.spec.sourceSha256, /^[a-f0-9]{64}$/);
+  assert.match(second.consumer.spec.sourceCanonicalSha256, /^[a-f0-9]{64}$/);
+  assert.equal(second.consumer.spec.canonicalSha256, second.consumer.spec.sourceCanonicalSha256);
+  assert.equal(second.consumer.spec.rootFilePath, 'openapi.json');
   assert.doesNotMatch(readFileSync(outPath, 'utf8'), /test-key|PMAK-/);
   assert.ok(state.calls.every((call) => call.method !== 'DELETE'));
 });
@@ -108,8 +128,66 @@ test('dual-workspace setup rejects duplicate exact-name workspaces without mutat
     { id: 'duplicate-2', name: 'PayPal Pact Simulation - Consumer' },
   );
   await assert.rejects(
-    setupWorkspaceSimulation({ rootDir: process.cwd(), outPath: join(mkdtempSync(join(tmpdir(), 'postman-duplicate-')), 'bindings.json'), apiKey: 'test-key', apiBase: 'https://postman.test', fetchImpl }),
+    setupWorkspaceSimulation({ rootDir: process.cwd(), outPath: join(mkdtempSync(join(tmpdir(), 'postman-duplicate-')), 'bindings.json'), apiKey: 'test-key', apiBase: 'https://api.postman.com', fetchImpl }),
     /multiple Postman workspaces named PayPal Pact Simulation - Consumer/,
   );
   assert.ok(state.calls.every((call) => call.method === 'GET'));
+});
+
+test('workspace setup validates both local asset pairs before the first mutation', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'postman-invalid-assets-'));
+  const invalidSpec = join(directory, 'not-oas.json');
+  const collection = join(directory, 'collection.json');
+  const validSpec = join(directory, 'valid-oas.json');
+  writeFileSync(invalidSpec, JSON.stringify({ name: 'not OpenAPI' }));
+  writeFileSync(validSpec, JSON.stringify({
+    openapi: '3.0.3', info: { title: 'valid', version: '1' }, paths: {},
+  }));
+  writeFileSync(collection, JSON.stringify({ info: { name: 'Collection' }, item: [] }));
+  let calls = 0;
+  const definition = (specFixture) => ({
+    participant: 'participant', workspaceName: 'Workspace', workspaceDescription: 'test',
+    specName: 'Spec', specFixture, collectionFixture: collection,
+  });
+  await assert.rejects(
+    setupWorkspaceSimulation({
+      rootDir: '/', outPath: join(directory, 'bindings.json'), apiKey: 'test-key',
+      definitions: { consumer: definition(invalidSpec), provider: definition(validSpec) },
+      fetchImpl: async () => { calls += 1; return response({}); },
+    }),
+    /unsupported OpenAPI version/,
+  );
+  assert.equal(calls, 0);
+});
+
+test('a malformed successful workspace list never triggers a create', async () => {
+  const methods = [];
+  await assert.rejects(
+    setupWorkspaceSimulation({
+      rootDir: process.cwd(),
+      outPath: join(mkdtempSync(join(tmpdir(), 'postman-malformed-list-')), 'bindings.json'),
+      apiKey: 'test-key',
+      fetchImpl: async (_input, options = {}) => {
+        methods.push(options.method ?? 'GET');
+        return response({ unexpected: true });
+      },
+    }),
+    /workspaces list response is malformed/,
+  );
+  assert.deepEqual(methods, ['GET']);
+});
+
+test('workspace setup verifies exact ROOT content and rejects Postman round-trip drift', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'postman-roundtrip-drift-'));
+  const outPath = join(directory, 'bindings.json');
+  const { state, fetchImpl } = postmanState({ mutateExactSpec: true });
+  await assert.rejects(
+    setupWorkspaceSimulation({
+      rootDir: process.cwd(), outPath, apiKey: 'test-key', fetchImpl,
+    }),
+    /consumer specification canonical digest drift/,
+  );
+  assert.equal(state.collections.length, 0);
+  assert.equal(state.specs.length, 1);
+  assert.throws(() => readFileSync(outPath), /ENOENT/);
 });

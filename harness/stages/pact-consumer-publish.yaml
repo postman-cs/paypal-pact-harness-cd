@@ -13,7 +13,7 @@ stage:
     - name: harness_source_ref
       type: String
       required: true
-      value: <+input>.default(main)
+      value: <+input>
     - name: harness_source_commit
       type: String
       required: true
@@ -22,10 +22,18 @@ stage:
       type: String
       required: true
       value: <+input>
+    - name: broker_username
+      type: String
+      required: true
+      value: <+input>.default(pact)
     - name: pacts_path
       type: String
       required: true
-      value: <+input>.default(pacts)
+      value: <+input>
+    - name: consumer_contract_command
+      type: String
+      required: true
+      value: <+input>
     - name: consumer_app_version
       type: String
       required: true
@@ -33,7 +41,7 @@ stage:
     - name: consumer_branch
       type: String
       required: true
-      value: <+input>.default(<+codebase.branch>)
+      value: <+input>
   spec:
     cloneCodebase: true
     platform:
@@ -49,9 +57,9 @@ stage:
               connectorRef: <+stage.variables.harness_source_connector>
               repoName: postman-cs/paypal-pact-harness-cd
               build:
-                type: branch
+                type: tag
                 spec:
-                  branch: <+stage.variables.harness_source_ref>
+                  tag: <+stage.variables.harness_source_ref>
               cloneDirectory: .pact-harness-source
               depth: 1
         - step:
@@ -76,6 +84,33 @@ stage:
                   cpu: "0.25"
         - step:
             type: Run
+            name: Generate executable consumer pacts
+            identifier: generate_executable_consumer_pacts
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                CONSUMER_CONTRACT_COMMAND: <+stage.variables.consumer_contract_command>
+                PACTS_PATH: <+stage.variables.pacts_path>
+              command: |
+                set -eu
+                [ -n "$CONSUMER_CONTRACT_COMMAND" ] || {
+                  echo "consumer_contract_command is required" >&2
+                  exit 2
+                }
+                node .pact-harness-source/scripts/ci/consumer-pact-run.mjs \
+                  prepare "$PACTS_PATH"
+                export PACT_OUTPUT_DIR="$PACTS_PATH"
+                sh -eu -c "$CONSUMER_CONTRACT_COMMAND"
+                node .pact-harness-source/scripts/ci/consumer-pact-run.mjs \
+                  validate "$PACTS_PATH"
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
+        - step:
+            type: Run
             name: Publish validated pacts to the broker
             identifier: publish_validated_pacts
             spec:
@@ -84,7 +119,8 @@ stage:
               shell: Sh
               envVariables:
                 PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
-                PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                PACT_BROKER_USERNAME: <+stage.variables.broker_username>
+                PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                 PACT_DO_NOT_TRACK: "true"
                 PACTS_PATH: <+stage.variables.pacts_path>
                 CONSUMER_APP_VERSION: <+stage.variables.consumer_app_version>

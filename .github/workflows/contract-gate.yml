@@ -242,7 +242,13 @@ jobs:
           if [ "$POSTMAN_CLOUD_ENABLED" = "true" ]; then
             test -n "$POSTMAN_API_KEY"
             COLLECTION="$(node -p "require('./config/postman-workspace-simulation.json').provider.collection.uid")"
-            CLOUD_ARGS+=(--cloud)
+            WORKSPACE_ID="$(node -p "require('./config/postman-workspace-simulation.json').provider.workspace.id")"
+            COLLECTION_SHA256="$(node -p "require('./config/postman-workspace-simulation.json').provider.collection.canonicalSha256")"
+            CLOUD_ARGS+=(
+              --cloud
+              --workspace-id "$WORKSPACE_ID"
+              --expected-sha256 "$COLLECTION_SHA256"
+            )
           fi
           node scripts/postman/run-lower-collection.mjs \
             --collection "$COLLECTION" \

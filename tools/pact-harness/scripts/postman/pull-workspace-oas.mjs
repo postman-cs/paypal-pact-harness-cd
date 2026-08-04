@@ -5,6 +5,13 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDoc } from '../../src/lib/load.mjs';
+import {
+  postmanApiUrl,
+  redactPostmanSecrets,
+  validatePostmanApiBase,
+  validatePostmanApiUrl,
+} from './postman-api-base.mjs';
+import { assertCanonicalDigest, pullSingleRootSpecFile } from './spec-file.mjs';
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -15,14 +22,6 @@ function required(value, name) {
   if (!value || typeof value !== 'string') throw new Error(`${name} is required`);
   if (!/^[A-Za-z0-9_-]{3,200}$/.test(value)) throw new Error(`${name} contains invalid characters`);
   return value;
-}
-
-function apiUrl(path, apiBase) {
-  const base = new URL(apiBase);
-  if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) {
-    throw new Error('POSTMAN_API_BASE_URL must use HTTPS');
-  }
-  return new URL(path, base);
 }
 
 function retryDelay(response, attempt) {
@@ -39,18 +38,34 @@ export async function requestPostmanJson(url, {
   timeoutMs = 15_000,
 } = {}) {
   if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw new Error('Postman API attempts must be an integer from 1 to 10');
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+    throw new Error('Postman API timeoutMs must be an integer from 1 to 120000');
+  }
+  const target = validatePostmanApiUrl(url);
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Postman API request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
     let response;
     try {
-      response = await fetchImpl(url, {
-        headers: { 'x-api-key': apiKey },
-        redirect: 'error',
-        signal: controller.signal,
-      });
-      if (response.ok) return response.json();
+      response = await Promise.race([
+        fetchImpl(target, {
+          headers: { 'x-api-key': apiKey },
+          redirect: 'error',
+          signal: controller.signal,
+        }),
+        timeout,
+      ]);
+      if (response.ok) return await Promise.race([response.json(), timeout]);
       lastError = new Error(`Postman API returned HTTP ${response.status}`);
       if (response.status !== 429 && response.status < 500) break;
     } catch (error) {
@@ -60,7 +75,9 @@ export async function requestPostmanJson(url, {
     }
     if (attempt < attempts) await sleepImpl(retryDelay(response, attempt));
   }
-  throw new Error(`Postman API request failed: ${lastError?.message ?? 'unknown error'}`);
+  throw new Error(
+    `Postman API request failed: ${redactPostmanSecrets(lastError?.message ?? 'unknown error', apiKey)}`,
+  );
 }
 
 function validateOas(content, role) {
@@ -89,7 +106,7 @@ async function assertSpecificationWorkspace({
   apiBase,
   request,
 }) {
-  const url = apiUrl('/workspaces', apiBase);
+  const url = postmanApiUrl('/workspaces', apiBase);
   url.searchParams.set('elementType', 'specification');
   url.searchParams.set('elementId', specId);
   url.searchParams.set('limit', '100');
@@ -100,27 +117,37 @@ async function assertSpecificationWorkspace({
   }
 }
 
-async function fetchSpecification({ role, workspaceId, specId, apiBase, request }) {
+async function fetchSpecification({
+  role,
+  workspaceId,
+  specId,
+  expectedCanonicalSha256,
+  apiBase,
+  request,
+}) {
   await assertSpecificationWorkspace({ workspaceId, specId, apiBase, request });
-  const body = await request(apiUrl(`/specs/${encodeURIComponent(specId)}/definitions`, apiBase));
-  const content = typeof body === 'string'
-    ? body
-    : typeof body?.definition === 'string'
-      ? body.definition
-      : body && typeof body === 'object' && !Array.isArray(body) && (body.openapi || body.swagger)
-        ? JSON.stringify(body, null, 2)
-        : undefined;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error(`${role} specification definition response was empty or unsupported`);
-  }
+  const root = await pullSingleRootSpecFile({
+    specId,
+    apiBase,
+    request,
+    label: `${role} specification`,
+  });
+  const content = root.content;
   const normalized = content.endsWith('\n') ? content : `${content}\n`;
   const { document, version } = validateOas(normalized, role);
+  const canonicalSha256 = assertCanonicalDigest({
+    content: normalized,
+    expected: expectedCanonicalSha256,
+    label: `${role} specification`,
+  });
   return {
     role,
     workspaceId,
     specId,
+    rootFilePath: root.path,
     content: normalized,
     sha256: createHash('sha256').update(normalized).digest('hex'),
+    canonicalSha256,
     bytes: Buffer.byteLength(normalized),
     openapiVersion: version,
     title: document.info.title,
@@ -144,6 +171,8 @@ export async function pullWorkspaceOas({
   consumerSpecId,
   providerWorkspaceId,
   providerSpecId,
+  consumerExpectedCanonicalSha256,
+  providerExpectedCanonicalSha256,
   outDir = '.contract-inputs/postman',
   apiKey,
   apiBase = 'https://api.postman.com',
@@ -157,16 +186,29 @@ export async function pullWorkspaceOas({
     providerWorkspaceId: required(providerWorkspaceId, 'provider workspace ID'),
     providerSpecId: required(providerSpecId, 'provider specification ID'),
   };
+  if (inputs.consumerWorkspaceId === inputs.providerWorkspaceId) {
+    throw new Error('consumer and provider workspace IDs must be distinct');
+  }
+  if (inputs.consumerSpecId === inputs.providerSpecId) {
+    throw new Error('consumer and provider specification IDs must be distinct');
+  }
   if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
+  const base = validatePostmanApiBase(apiBase);
   const request = (url) => requestPostmanJson(url, { apiKey, fetchImpl, sleepImpl });
   const artifacts = await Promise.all([
     fetchSpecification({
       role: 'consumer', workspaceId: inputs.consumerWorkspaceId,
-      specId: inputs.consumerSpecId, apiBase, request,
+      specId: inputs.consumerSpecId,
+      expectedCanonicalSha256: consumerExpectedCanonicalSha256,
+      apiBase: base,
+      request,
     }),
     fetchSpecification({
       role: 'provider', workspaceId: inputs.providerWorkspaceId,
-      specId: inputs.providerSpecId, apiBase, request,
+      specId: inputs.providerSpecId,
+      expectedCanonicalSha256: providerExpectedCanonicalSha256,
+      apiBase: base,
+      request,
     }),
   ]);
 
@@ -178,7 +220,7 @@ export async function pullWorkspaceOas({
   const manifest = {
     schemaVersion: 1,
     retrievedAt: now().toISOString(),
-    apiBase: new URL(apiBase).origin,
+    apiBase: base.origin,
     artifacts,
   };
   const manifestPath = join(outDir, 'postman-oas-provenance.json');
@@ -194,6 +236,8 @@ if (isMain) {
     consumerSpecId: arg('consumer-spec-id'),
     providerWorkspaceId: arg('provider-workspace-id'),
     providerSpecId: arg('provider-spec-id'),
+    consumerExpectedCanonicalSha256: arg('consumer-expected-canonical-sha256'),
+    providerExpectedCanonicalSha256: arg('provider-expected-canonical-sha256'),
     outDir: arg('out-dir', '.contract-inputs/postman'),
     apiKey: process.env.POSTMAN_API_KEY,
     apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',

@@ -5,7 +5,20 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDoc } from '../../src/lib/load.mjs';
+import { canonicalCollectionSha256 } from './collection-canonical.mjs';
 import { syncCloudCollection } from './sync-cloud-collection.mjs';
+import {
+  postmanApiUrl,
+  redactPostmanSecrets,
+  validatePostmanApiBase,
+  validatePostmanApiUrl,
+} from './postman-api-base.mjs';
+import {
+  assertCanonicalDigest,
+  canonicalDocumentSha256,
+  postmanSpecFileUrl,
+  pullSingleRootSpecFile,
+} from './spec-file.mjs';
 
 const DEFAULTS = {
   consumer: {
@@ -31,14 +44,6 @@ function arg(name, fallback) {
   return index >= 0 ? process.argv[index + 1] : fallback;
 }
 
-function apiUrl(path, apiBase) {
-  const url = new URL(path, apiBase);
-  if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) {
-    throw new Error('POSTMAN_API_BASE_URL must use HTTPS');
-  }
-  return url;
-}
-
 export async function requestJson(url, {
   apiKey,
   method = 'GET',
@@ -47,25 +52,36 @@ export async function requestJson(url, {
   timeoutMs = 20_000,
 } = {}) {
   if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
+  const target = validatePostmanApiUrl(url);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Postman API request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
   try {
-    const response = await fetchImpl(url, {
-      method,
-      redirect: 'error',
-      signal: controller.signal,
-      headers: {
-        'x-api-key': apiKey,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    const response = await Promise.race([
+      fetchImpl(target, {
+        method,
+        redirect: 'error',
+        signal: controller.signal,
+        headers: {
+          'x-api-key': apiKey,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+      timeout,
+    ]);
     if (!response.ok) {
-      const detail = (await response.text()).replace(/PMAK-[A-Za-z0-9_-]+/g, '[REDACTED]');
-      throw new Error(`Postman ${method} ${new URL(url).pathname} returned HTTP ${response.status}: ${detail.slice(0, 500)}`);
+      throw new Error(`Postman ${method} ${target.pathname} returned HTTP ${response.status}`);
     }
     if (response.status === 204) return null;
-    return response.json();
+    return await Promise.race([response.json(), timeout]);
+  } catch (error) {
+    throw new Error(redactPostmanSecrets(error?.message ?? error, apiKey));
   } finally {
     clearTimeout(timer);
   }
@@ -74,29 +90,56 @@ export async function requestJson(url, {
 async function paged({ url, field, request }) {
   const values = [];
   let cursor;
+  const seenCursors = new Set();
+  let pages = 0;
   do {
+    pages += 1;
+    if (pages > 100) throw new Error(`Postman ${field} pagination exceeded 100 pages`);
     const pageUrl = new URL(url);
     pageUrl.searchParams.set('limit', '100');
     if (cursor) pageUrl.searchParams.set('cursor', cursor);
     const body = await request(pageUrl);
-    values.push(...(Array.isArray(body?.[field]) ? body[field] : []));
-    cursor = body?.meta?.nextCursor || null;
+    if (!body || typeof body !== 'object' || !Array.isArray(body[field])) {
+      throw new Error(`Postman ${field} list response is malformed`);
+    }
+    values.push(...body[field]);
+    const next = body.meta?.nextCursor;
+    if (next !== undefined && next !== null && typeof next !== 'string') {
+      throw new Error(`Postman ${field} pagination cursor is malformed`);
+    }
+    cursor = next || null;
+    if (cursor && seenCursors.has(cursor)) {
+      throw new Error(`Postman ${field} pagination repeated a cursor`);
+    }
+    if (cursor) seenCursors.add(cursor);
   } while (cursor);
   return values;
 }
 
-async function ensureWorkspace({ name, description, workspaceType, apiBase, request }) {
+async function ensureWorkspace({ name, description, workspaceType, teamId, apiBase, request }) {
   const workspaces = await paged({
-    url: apiUrl('/workspaces', apiBase),
+    url: postmanApiUrl('/workspaces', apiBase),
     field: 'workspaces',
     request,
   });
   const matches = workspaces.filter((workspace) => workspace?.name === name);
   if (matches.length > 1) throw new Error(`multiple Postman workspaces named ${name}`);
-  if (matches.length === 1) return { action: 'reused', id: matches[0].id, name };
-  const created = await request(apiUrl('/workspaces', apiBase), {
+  if (matches.length === 1) {
+    if (!matches[0].id) throw new Error(`Postman workspace ${name} has no ID`);
+    const typeMatches = workspaceType === 'private'
+      ? !matches[0].type || ['team', 'private'].includes(matches[0].type)
+      : !matches[0].type || matches[0].type === workspaceType;
+    const visibilityMatches = workspaceType !== 'private' ||
+      !matches[0].visibility || matches[0].visibility === 'private';
+    if (!typeMatches || !visibilityMatches) {
+      throw new Error(`Postman workspace ${name} has type ${matches[0].type}, expected ${workspaceType}`);
+    }
+    return { action: 'reused', id: matches[0].id, name };
+  }
+  const created = await request(postmanApiUrl('/workspaces', apiBase), {
     method: 'POST',
     body: {
+      ...(teamId ? { teamId } : {}),
       workspace: {
         name,
         type: workspaceType,
@@ -117,38 +160,87 @@ function oasType(document) {
   throw new Error(`unsupported OpenAPI version ${version || '(missing)'}`);
 }
 
-async function ensureSpec({ workspaceId, name, content, apiBase, request }) {
-  const listUrl = apiUrl('/specs', apiBase);
+function validateSpec(document, role) {
+  const type = oasType(document);
+  if (typeof document.info?.title !== 'string' || !document.info.title.trim()) {
+    throw new Error(`${role} specification requires info.title`);
+  }
+  if (!document.paths || typeof document.paths !== 'object' || Array.isArray(document.paths)) {
+    throw new Error(`${role} specification requires an object paths map`);
+  }
+  return type;
+}
+
+function validateCollection(collection, role) {
+  if (typeof collection?.info?.name !== 'string' || !collection.info.name.trim()) {
+    throw new Error(`${role} collection requires info.name`);
+  }
+  if (!Array.isArray(collection.item)) throw new Error(`${role} collection requires an item array`);
+}
+
+async function verifyExactSpec({ specId, content, apiBase, request, role }) {
+  const root = await pullSingleRootSpecFile({
+    specId,
+    apiBase,
+    request,
+    label: `${role} specification`,
+  });
+  const expectedCanonicalSha256 = canonicalDocumentSha256(content, `${role} source specification`);
+  const canonicalSha256 = assertCanonicalDigest({
+    content: root.content,
+    expected: expectedCanonicalSha256,
+    label: `${role} specification`,
+  });
+  return {
+    rootFilePath: root.path,
+    sha256: sha256(root.content),
+    canonicalSha256,
+  };
+}
+
+async function ensureSpec({ workspaceId, name, content, specType, apiBase, request, role }) {
+  const listUrl = postmanApiUrl('/specs', apiBase);
   listUrl.searchParams.set('workspaceId', workspaceId);
   const specs = await paged({ url: listUrl, field: 'specs', request });
   const matches = specs.filter((spec) => spec?.name === name);
   if (matches.length > 1) throw new Error(`multiple specifications named ${name} in workspace ${workspaceId}`);
+  let action;
+  let specId;
   if (matches.length === 0) {
-    const createUrl = apiUrl('/specs', apiBase);
+    const createUrl = postmanApiUrl('/specs', apiBase);
     createUrl.searchParams.set('workspaceId', workspaceId);
-    const document = parseDoc(content);
     const created = await request(createUrl, {
       method: 'POST',
       body: {
         name,
-        type: oasType(document),
-        files: [{ path: 'openapi.json', type: 'DEFAULT', content }],
+        type: specType,
+        files: [{ path: 'openapi.json', type: 'ROOT', content }],
       },
     });
     if (!created?.id) throw new Error(`Postman did not return an ID for specification ${name}`);
-    return { action: 'created', id: created.id, name };
+    action = 'created';
+    specId = created.id;
+  } else {
+    specId = matches[0].id;
+    if (!specId) throw new Error(`specification ${name} has no ID`);
+    if (matches[0].type && matches[0].type !== specType) {
+      throw new Error(`specification ${specId} has type ${matches[0].type}, expected ${specType}`);
+    }
+    const current = await pullSingleRootSpecFile({
+      specId,
+      apiBase,
+      request,
+      label: `${role} specification`,
+    });
+    await request(postmanSpecFileUrl({ specId, path: current.path, apiBase }), {
+      method: 'PATCH',
+      body: { content },
+    });
+    action = 'updated';
   }
 
-  const specId = matches[0].id;
-  const files = await request(apiUrl(`/specs/${encodeURIComponent(specId)}/files`, apiBase));
-  const fileList = Array.isArray(files?.files) ? files.files : [];
-  const root = fileList.find((file) => file?.type === 'ROOT') ?? fileList.find((file) => file?.path === 'openapi.json');
-  if (!root?.path) throw new Error(`specification ${specId} has no root file to update`);
-  await request(apiUrl(`/specs/${encodeURIComponent(specId)}/files/${root.path.split('/').map(encodeURIComponent).join('/')}`, apiBase), {
-    method: 'PATCH',
-    body: { content },
-  });
-  return { action: 'updated', id: specId, name };
+  const verified = await verifyExactSpec({ specId, content, apiBase, request, role });
+  return { action, id: specId, name, ...verified };
 }
 
 function sha256(content) {
@@ -172,6 +264,7 @@ export async function setupWorkspaceSimulation({
   apiKey,
   apiBase = 'https://api.postman.com',
   workspaceType = 'team',
+  teamId = '',
   fetchImpl = fetch,
   definitions = DEFAULTS,
   now = () => new Date(),
@@ -180,37 +273,50 @@ export async function setupWorkspaceSimulation({
   if (!['team', 'personal', 'private'].includes(workspaceType)) {
     throw new Error('workspaceType must be team, personal, or private');
   }
-  const base = new URL(apiBase);
+  if (teamId && !/^[A-Za-z0-9_-]{3,200}$/.test(teamId)) {
+    throw new Error('teamId contains invalid characters');
+  }
+  const base = validatePostmanApiBase(apiBase);
   const request = (url, options = {}) => requestJson(url, { apiKey, fetchImpl, ...options });
   const result = { schemaVersion: 1, reconciledAt: now().toISOString(), apiBase: base.origin };
 
+  const prepared = {};
   for (const role of ['consumer', 'provider']) {
     const definition = definitions[role];
-    const specPath = resolve(rootDir, definition.specFixture);
-    const collectionPath = resolve(rootDir, definition.collectionFixture);
-    const specContent = readFileSync(specPath, 'utf8');
+    if (!definition) throw new Error(`${role} workspace definition is required`);
+    const specContent = readFileSync(resolve(rootDir, definition.specFixture), 'utf8');
+    const collectionContent = readFileSync(resolve(rootDir, definition.collectionFixture), 'utf8');
     const specDocument = parseDoc(specContent);
-    const collectionContent = readFileSync(collectionPath, 'utf8');
     const collection = JSON.parse(collectionContent);
+    const specType = validateSpec(specDocument, role);
+    validateCollection(collection, role);
+    prepared[role] = { definition, specContent, collectionContent, specDocument, collection, specType };
+  }
+
+  for (const role of ['consumer', 'provider']) {
+    const { definition, specContent, collectionContent, specDocument, collection, specType } = prepared[role];
     const workspace = await ensureWorkspace({
       name: definition.workspaceName,
       description: definition.workspaceDescription,
       workspaceType,
-      apiBase,
+      teamId,
+      apiBase: base,
       request,
     });
     const spec = await ensureSpec({
       workspaceId: workspace.id,
       name: definition.specName,
       content: specContent,
-      apiBase,
+      specType,
+      apiBase: base,
       request,
+      role,
     });
     const collectionResult = await syncCloudCollection({
       collection,
       workspaceId: workspace.id,
       apiKey,
-      apiBase,
+      apiBase: base,
       fetchImpl,
     });
     result[role] = {
@@ -222,6 +328,7 @@ export async function setupWorkspaceSimulation({
         title: specDocument.info?.title ?? null,
         version: specDocument.info?.version ?? null,
         sourceSha256: sha256(specContent),
+        sourceCanonicalSha256: canonicalDocumentSha256(specContent, `${role} source specification`),
       },
       collection: {
         action: collectionResult.action,
@@ -229,6 +336,7 @@ export async function setupWorkspaceSimulation({
         name: collection.info.name,
         fixture: definition.collectionFixture,
         sourceSha256: sha256(collectionContent),
+        canonicalSha256: collectionResult.canonicalSha256,
       },
     };
   }
@@ -245,6 +353,7 @@ if (isMain) {
     apiKey: process.env.POSTMAN_API_KEY,
     apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
     workspaceType: arg('workspace-type', process.env.POSTMAN_WORKSPACE_TYPE || 'team'),
+    teamId: arg('team-id', process.env.POSTMAN_TEAM_ID || ''),
   });
   for (const role of ['consumer', 'provider']) {
     const item = output[role];

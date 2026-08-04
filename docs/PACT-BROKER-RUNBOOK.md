@@ -27,7 +27,7 @@ is not required: the CLI and Pact Broker paths described here are open source.
 | Consumer and provider OAS source of truth | Postman workspaces / Spec Hub | Collaboration, review, governance, and discoverability stay in the Postman product suite. |
 | Design compatibility | This repo's static BDC gate | Fast consumer-OAS × provider-OAS feedback before a live provider exists. |
 | API examples and behavioral suites | Postman Collections | Human-readable scenarios remain reusable for development, CI, and lower-environment smoke tests. |
-| Collection execution and reports | Postman CLI | Positive/negative behavior, JSON/JUnit evidence, and optional Cloud run history. |
+| Collection execution and reports | Postman CLI | Positive/negative behavior and JSON/JUnit evidence from a workspace- and digest-verified Cloud snapshot. |
 | Consumer-code interaction capture | Pact framework in each consumer repo | Only the consumer test can prove its real client produced and handled the interaction. |
 | Contract matrix and environment state | OSS Pact Broker | Versioned pacts, verification results, selectors, pending/WIP, deploy decisions, and deployments. |
 | Promotion orchestration | Harness | Harness runs the gates, deployment, Postman smoke checks, and post-success recording. |
@@ -73,7 +73,7 @@ Import these stage objects into the pipelines that own the corresponding event:
 | --- | --- |
 | `harness/stages/postman-oas-preflight.yaml` | Consumer or provider design pipeline; pulls **both** OAS documents from Postman and runs static BDC. |
 | `harness/stages/consumer-contract-gate.yaml` | Existing Postman-first lower-runtime gate; route parity, schemas, positive/negative Postman Collection cases, JUnit, and evidence sealing. |
-| `harness/stages/pact-consumer-publish.yaml` | Consumer pipeline, immediately after its executable Pact tests. |
+| `harness/stages/pact-consumer-publish.yaml` | Consumer pipeline; runs the configured executable Pact test command and publishes its output in one CI stage. |
 | `harness/stages/pact-provider-verify.yaml` | Provider pipeline after the provider is started and its state endpoint is available. |
 | `harness/stages/pact-can-i-deploy.yaml` | Immediately before the existing PayPal deployment/promotion stage. |
 | `harness/stages/pact-record-deployment.yaml` | After deployment and any required Postman CLI smoke collection succeed. |
@@ -89,7 +89,7 @@ Create references, never literal credentials, for:
 | Secret | Purpose |
 | --- | --- |
 | `paypal_postman_service_account_pmak` | Read the two authorized Postman workspaces and run Cloud collections. |
-| `paypal_pact_broker_token` | Publish pacts/results and read/write deployment state. |
+| `paypal_pact_broker_password` | Basic-auth password for publishing pacts/results and reading/writing deployment state on the self-managed OSS Broker. |
 | `paypal_pact_provider_bearer_token` | Authenticate official verifier requests to the provider. |
 | `paypal_contract_demo_token` | Existing lower-environment Postman and route proof. |
 
@@ -99,23 +99,32 @@ the demo provider call. The reusable production verifier uses the service-specif
 
 Runtime inputs must supply both Postman workspace IDs and Spec Hub IDs, Pact
 participant names, Broker URL, target environment, and the date from which WIP
-pacts are included. Use the immutable Git commit SHA as every application version;
+pacts are included. The complete lower Broker proof also requires an independently
+reviewed full source SHA plus explicit consumer and provider logical Pact branches.
+Do not derive those values from the selected branch/tag, pull-request target, or a
+manual-run default. Use the immutable Git commit SHA as every application version;
 never publish mutable labels such as `latest` as a version.
 
 The checked-in Pact CLI lock pins the Linux/Amd64 release URL, byte count, and
 SHA-256. The installer rejects other platforms, repositories, redirect hosts,
-sizes, or digests. Tokens are passed through the environment and are not written
+sizes, or digests. Credentials are passed through the environment and are not written
 to the repository or reports. Pact usage telemetry is disabled in every official
 CLI stage with `PACT_DO_NOT_TRACK=true`.
 
 ## Consumer pipeline
 
 1. Lint and govern the consumer OAS in Postman.
-2. Run `postman-oas-preflight.yaml` against the consumer and provider Spec Hub IDs.
-3. Run the consumer unit suite with the language Pact library and real production
-   API client. Assert both request construction and response handling.
-4. Publish only after the tests pass, using the consumer Git SHA and branch.
-5. Optionally run the consumer Postman Collection for complementary scenarios.
+2. Run `postman-oas-preflight.yaml` against the consumer and provider Spec Hub
+   IDs plus their reviewed `sourceCanonicalSha256` values from the binding config.
+3. Choose a new workspace-relative `pacts_path` for the execution, such as
+   `pacts/<+pipeline.executionId>`. The publish stage creates it and exports it as
+   `PACT_OUTPUT_DIR`; configure the language Pact library to write there.
+4. Run the consumer unit suite with the language Pact library and real production
+   API client. Assert both request construction and response handling. A no-op,
+   pre-existing output directory, or Pact with zero interactions fails closed.
+5. Publish only after the tests pass, using the consumer Git SHA and an explicitly
+   supplied logical branch rather than trigger-derived branch metadata.
+6. Optionally run the consumer Postman Collection for complementary scenarios.
 
 A Pact is the consumer's statement: "given provider state S, when my code sends R,
 I require response M." It should express the minimum the consumer relies on, not

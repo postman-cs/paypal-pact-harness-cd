@@ -61,3 +61,22 @@ test('matches the committed golden pact', () => {
   const rendered = JSON.parse(serialize(postmanToPact(collection, { provider: 'paypal-orders' })));
   assert.deepEqual(rendered, golden);
 });
+
+test('rejects malformed declared JSON instead of silently publishing an opaque body', () => {
+  const malformed = structuredClone(collection);
+  malformed.item[0].response[0].header = [{ key: 'Content-Type', value: 'application/json' }];
+  malformed.item[0].response[0].body = '{"id":';
+  assert.throws(
+    () => postmanToPact(malformed, { provider: 'paypal-orders' }),
+    /saved response body declares JSON but is not valid JSON/,
+  );
+});
+
+test('rejects an invalid saved-example HTTP status before Pact publication', () => {
+  const malformed = structuredClone(collection);
+  malformed.item[0].response[0].code = 'success';
+  assert.throws(
+    () => postmanToPact(malformed, { provider: 'paypal-orders' }),
+    /invalid HTTP status/,
+  );
+});

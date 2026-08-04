@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,7 @@ import {
   selectPactCliAsset,
   sha256,
   validatePactCliLock,
+  validatePactCliOutput,
 } from '../scripts/install-pact-cli.mjs';
 
 function lockFor(content, sha = sha256(content)) {
@@ -85,5 +86,125 @@ test('the Pact CLI installer fails closed on a digest mismatch', async () => {
       fetchImpl: async () => new Response(content, { status: 200 }),
     }),
     /sha256 mismatch/,
+  );
+});
+
+test('the Pact CLI installer rejects suspicious locked and redirected URLs', async () => {
+  const content = Buffer.from('locked');
+  const credentialLock = lockFor(content);
+  credentialLock.assets['linux-x64-gnu'].url =
+    'https://token@github.com/pact-foundation/pact-cli/releases/download/v9.9.9/pact-x86_64-linux-gnu';
+  assert.throws(
+    () => selectPactCliAsset(credentialLock, { platform: 'linux', arch: 'x64' }),
+    /must not contain credentials/,
+  );
+
+  const directory = mkdtempSync(join(tmpdir(), 'pact-cli-redirect-'));
+  const lockPath = join(directory, 'lock.json');
+  writeFileSync(lockPath, JSON.stringify(lockFor(content)));
+  await assert.rejects(
+    installPactCli({
+      lockPath,
+      output: join(directory, 'pact'),
+      platform: 'linux',
+      arch: 'x64',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        url: 'https://attacker.example/pact',
+        headers: new Headers({ 'content-length': String(content.length) }),
+        body: new Response(content).body,
+      }),
+    }),
+    /redirected to an untrusted host/,
+  );
+});
+
+test('the Pact CLI installer rejects a mismatched Content-Length before reading the body', async () => {
+  const content = Buffer.from('locked');
+  const directory = mkdtempSync(join(tmpdir(), 'pact-cli-length-'));
+  const lockPath = join(directory, 'lock.json');
+  writeFileSync(lockPath, JSON.stringify(lockFor(content)));
+  let pulled = false;
+  const body = {
+    getReader() {
+      pulled = true;
+      throw new Error('body must not be read');
+    },
+  };
+  await assert.rejects(
+    installPactCli({
+      lockPath,
+      output: join(directory, 'pact'),
+      platform: 'linux',
+      arch: 'x64',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        url: '',
+        headers: new Headers({ 'content-length': String(content.length + 1) }),
+        body,
+      }),
+    }),
+    /Content-Length mismatch/,
+  );
+  assert.equal(pulled, false);
+});
+
+test('the Pact CLI installer cancels an oversized stream at the locked byte boundary', async () => {
+  const content = Buffer.from('locked');
+  const directory = mkdtempSync(join(tmpdir(), 'pact-cli-oversize-'));
+  const lockPath = join(directory, 'lock.json');
+  writeFileSync(lockPath, JSON.stringify(lockFor(content)));
+  let pullCount = 0;
+  let cancelled = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      pullCount += 1;
+      controller.enqueue(Buffer.alloc(content.length + 1));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  await assert.rejects(
+    installPactCli({
+      lockPath,
+      output: join(directory, 'pact'),
+      platform: 'linux',
+      arch: 'x64',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        url: '',
+        headers: new Headers(),
+        body,
+      }),
+    }),
+    /exceeds locked/,
+  );
+  assert.equal(cancelled, true);
+  assert.ok(pullCount <= 2, `stream was pulled ${pullCount} times`);
+});
+
+test('a customer checkout cannot redirect the relative Pact CLI output through symlinks', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'pact-cli-output-'));
+  const workspace = join(directory, 'workspace');
+  const outside = join(directory, 'outside');
+  mkdirSync(workspace);
+  mkdirSync(outside);
+  symlinkSync(outside, join(workspace, '.pact'));
+  assert.throws(
+    () => validatePactCliOutput('.pact/bin/pact', { cwd: workspace }),
+    /parent resolves outside/,
+  );
+
+  const target = join(workspace, 'pact');
+  const outsideFile = join(outside, 'pact');
+  writeFileSync(outsideFile, 'outside');
+  symlinkSync(outsideFile, target);
+  assert.throws(
+    () => validatePactCliOutput(target, { cwd: workspace }),
+    /may not be a symbolic link/,
   );
 });

@@ -6,7 +6,7 @@
 # The committed pact used here is seeded integration evidence; production consumer
 # repositories must publish pacts created by executable tests of their real clients.
 pipeline:
-  name: PayPal Postman + Pact Broker proof - lower
+  name: PayPal Postman and Pact Broker proof - lower
   identifier: paypal_postman_pact_broker_lower
   orgIdentifier: default
   projectIdentifier: default_project
@@ -20,16 +20,31 @@ pipeline:
     - name: BROKER_BASE_URL
       type: String
       value: <+input>
+    - name: REVIEWED_SOURCE_COMMIT
+      type: String
+      value: <+input> # independently reviewed full SHA; must match the selected build ref
+    - name: CONSUMER_PACT_BRANCH
+      type: String
+      value: <+input> # logical branch for branch, tag, PR, and manual executions
+    - name: PROVIDER_PACT_BRANCH
+      type: String
+      value: <+input> # logical branch for branch, tag, PR, and manual executions
     - name: CONSUMER_WORKSPACE_ID
       type: String
       value: <+input>
     - name: CONSUMER_SPEC_ID
       type: String
       value: <+input>
+    - name: CONSUMER_SPEC_CANONICAL_SHA256
+      type: String
+      value: <+input>
     - name: PROVIDER_WORKSPACE_ID
       type: String
       value: <+input>
     - name: PROVIDER_SPEC_ID
+      type: String
+      value: <+input>
+    - name: PROVIDER_SPEC_CANONICAL_SHA256
       type: String
       value: <+input>
     - name: INCLUDE_WIP_PACTS_SINCE
@@ -40,7 +55,7 @@ pipeline:
       value: <+input>.default(lower)
   stages:
     - stage:
-        name: Postman-first Broker integration proof
+        name: Consumer first Broker
         identifier: postman_pact_broker_proof
         type: CI
         spec:
@@ -59,10 +74,11 @@ pipeline:
                     image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
-                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                      EXPECTED_SOURCE_COMMIT: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                     command: |
                       set -eu
-                      node scripts/ci/attest-harness-source.mjs
+                      node scripts/ci/attest-harness-source.mjs \
+                        --expected-commit "$EXPECTED_SOURCE_COMMIT"
                     resources:
                       limits:
                         memory: 500Mi
@@ -109,9 +125,12 @@ pipeline:
                       node tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
                         --consumer-workspace-id "<+pipeline.variables.CONSUMER_WORKSPACE_ID>" \
                         --consumer-spec-id "<+pipeline.variables.CONSUMER_SPEC_ID>" \
+                        --consumer-expected-canonical-sha256 "<+pipeline.variables.CONSUMER_SPEC_CANONICAL_SHA256>" \
                         --provider-workspace-id "<+pipeline.variables.PROVIDER_WORKSPACE_ID>" \
                         --provider-spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" \
+                        --provider-expected-canonical-sha256 "<+pipeline.variables.PROVIDER_SPEC_CANONICAL_SHA256>" \
                         --out-dir "$INPUTS"
+                      unset POSTMAN_API_KEY
                       cp "$INPUTS/postman-oas-provenance.json" \
                         "$REPORTS/postman-oas-provenance.json"
                       node tools/pact-harness/pact-harness.mjs oas-to-pact \
@@ -175,8 +194,11 @@ pipeline:
                     shell: Sh
                     envVariables:
                       PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
-                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_BROKER_USERNAME: pact
+                      PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
+                      CONSUMER_APP_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
+                      CONSUMER_PACT_BRANCH: <+pipeline.variables.CONSUMER_PACT_BRANCH>
                     command: |
                       set -eu
                       mkdir -p .pact/bin .pacts .contract-reports/pact-consumer
@@ -185,8 +207,8 @@ pipeline:
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
                       .pact/bin/pact broker publish .pacts \
-                        --consumer-app-version "<+codebase.commitSha>" \
-                        --branch "<+codebase.branch>" \
+                        --consumer-app-version "$CONSUMER_APP_VERSION" \
+                        --branch "$CONSUMER_PACT_BRANCH" \
                         --validate \
                         --strict \
                         --output json \
@@ -206,9 +228,12 @@ pipeline:
                     shell: Sh
                     envVariables:
                       PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
-                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_BROKER_USERNAME: pact
+                      PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
                       PROVIDER_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                      PROVIDER_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
+                      PROVIDER_PACT_BRANCH: <+pipeline.variables.PROVIDER_PACT_BRANCH>
                     command: |
                       set -eu
                       REPORTS=.contract-reports/pact-provider
@@ -227,8 +252,8 @@ pipeline:
                         --consumer-version-selectors '[{"mainBranch":true},{"deployedOrReleased":true},{"matchingBranch":true}]' \
                         --enable-pending \
                         --include-wip-pacts-since "<+pipeline.variables.INCLUDE_WIP_PACTS_SINCE>" \
-                        --provider-version "<+codebase.commitSha>" \
-                        --provider-branch "<+codebase.branch>" \
+                        --provider-version "$PROVIDER_VERSION" \
+                        --provider-branch "$PROVIDER_PACT_BRANCH" \
                         --publish \
                         --junit "$REPORTS/provider-verification.xml" \
                         --json "$REPORTS/provider-verification.json" \
@@ -252,8 +277,10 @@ pipeline:
                     shell: Sh
                     envVariables:
                       PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
-                      PACT_BROKER_TOKEN: <+secrets.getValue("paypal_pact_broker_token")>
+                      PACT_BROKER_USERNAME: pact
+                      PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
+                      PROVIDER_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                     command: |
                       set -eu
                       REPORTS=.contract-reports/pact-deploy
@@ -263,7 +290,7 @@ pipeline:
                         --output .pact/bin/pact
                       .pact/bin/pact broker can-i-deploy \
                         --pacticipant paypal-orders \
-                        --version "<+codebase.commitSha>" \
+                        --version "$PROVIDER_VERSION" \
                         --to-environment "<+pipeline.variables.TARGET_ENVIRONMENT>" \
                         --retry-while-unknown 6 \
                         --retry-interval 10 \

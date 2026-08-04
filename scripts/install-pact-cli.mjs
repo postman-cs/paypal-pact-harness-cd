@@ -3,14 +3,17 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +32,35 @@ function arg(name, fallback) {
 
 export function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
+}
+
+function isInside(root, candidate) {
+  const rel = relative(root, candidate);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+export function validatePactCliOutput(output, { cwd = process.cwd() } = {}) {
+  if (!output || typeof output !== 'string') throw new Error('Pact CLI output path is required');
+  const root = realpathSync(cwd);
+  const target = resolve(root, output);
+  if (!isAbsolute(output) && !isInside(root, target)) {
+    throw new Error('relative Pact CLI output path escapes the working directory');
+  }
+  if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
+    throw new Error('Pact CLI output path may not be a symbolic link');
+  }
+  if (!isAbsolute(output)) {
+    let existingParent = dirname(target);
+    while (!existsSync(existingParent)) {
+      const parent = dirname(existingParent);
+      if (parent === existingParent) break;
+      existingParent = parent;
+    }
+    if (!isInside(root, realpathSync(existingParent))) {
+      throw new Error('Pact CLI output parent resolves outside the working directory');
+    }
+  }
+  return target;
 }
 
 export function validatePactCliLock(lock) {
@@ -51,6 +83,9 @@ export function selectPactCliAsset(lock, { platform = process.platform, arch = p
   if (url.protocol !== 'https:' || url.hostname !== 'github.com') {
     throw new Error(`Pact CLI asset URL is not an approved GitHub release URL: ${asset.url}`);
   }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('Pact CLI asset URL must not contain credentials, a query, or a fragment');
+  }
   if (!url.pathname.startsWith(`/pact-foundation/pact-cli/releases/download/${lock.release}/`)) {
     throw new Error(`Pact CLI asset URL does not match locked release ${lock.release}`);
   }
@@ -67,6 +102,51 @@ function assertFinalDownloadUrl(response) {
   if (finalUrl.protocol !== 'https:' || !ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)) {
     throw new Error(`Pact CLI download redirected to an untrusted host: ${finalUrl.hostname}`);
   }
+  if (finalUrl.username || finalUrl.password) {
+    throw new Error('Pact CLI download redirected to a URL containing credentials');
+  }
+}
+
+async function readLockedDownload(response, expectedBytes) {
+  const lengthHeader = response.headers.get('content-length');
+  if (lengthHeader !== null) {
+    if (!/^\d+$/.test(lengthHeader)) {
+      throw new Error('Pact CLI download returned an invalid Content-Length');
+    }
+    const declaredLength = Number(lengthHeader);
+    if (declaredLength !== expectedBytes) {
+      throw new Error(
+        `Pact CLI Content-Length mismatch: expected ${expectedBytes}, received ${declaredLength}`,
+      );
+    }
+  }
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    throw new Error('Pact CLI download did not return a readable response body');
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      received += chunk.length;
+      if (received > expectedBytes) {
+        await reader.cancel('locked byte count exceeded');
+        throw new Error(`Pact CLI byte count exceeds locked ${expectedBytes} bytes`);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (received !== expectedBytes) {
+    throw new Error(`Pact CLI byte count mismatch: expected ${expectedBytes}, received ${received}`);
+  }
+  return Buffer.concat(chunks, received);
 }
 
 export async function installPactCli({
@@ -76,14 +156,14 @@ export async function installPactCli({
   arch = process.arch,
   fetchImpl = fetch,
 } = {}) {
-  if (!output) throw new Error('Pact CLI output path is required');
+  const outputPath = validatePactCliOutput(output);
   const lock = validatePactCliLock(JSON.parse(readFileSync(lockPath, 'utf8')));
   const asset = selectPactCliAsset(lock, { platform, arch });
 
   try {
-    const current = readFileSync(output);
+    const current = readFileSync(outputPath);
     if (current.length === asset.bytes && sha256(current) === asset.sha256) {
-      chmodSync(output, 0o755);
+      chmodSync(outputPath, 0o755);
       return { version: lock.version, output, sha256: asset.sha256, reused: true };
     }
   } catch (error) {
@@ -93,26 +173,19 @@ export async function installPactCli({
   const response = await fetchImpl(asset.url, { redirect: 'follow' });
   if (!response.ok) throw new Error(`Pact CLI download returned HTTP ${response.status}`);
   assertFinalDownloadUrl(response);
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
-    throw new Error(`Pact CLI download exceeds ${MAX_DOWNLOAD_BYTES} bytes`);
-  }
-  const content = Buffer.from(await response.arrayBuffer());
-  if (content.length !== asset.bytes) {
-    throw new Error(`Pact CLI byte count mismatch: expected ${asset.bytes}, received ${content.length}`);
-  }
+  const content = await readLockedDownload(response, asset.bytes);
   const actual = sha256(content);
   if (actual !== asset.sha256) {
     throw new Error(`Pact CLI sha256 mismatch: expected ${asset.sha256}, received ${actual}`);
   }
 
-  mkdirSync(dirname(output), { recursive: true });
-  const temporary = `${output}.part-${process.pid}`;
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const temporary = `${outputPath}.part-${process.pid}`;
   try {
     writeFileSync(temporary, content, { mode: 0o755 });
     if (statSync(temporary).size !== asset.bytes) throw new Error('Pact CLI temporary write was incomplete');
-    renameSync(temporary, output);
-    chmodSync(output, 0o755);
+    renameSync(temporary, outputPath);
+    chmodSync(outputPath, 0o755);
   } finally {
     rmSync(temporary, { force: true });
   }

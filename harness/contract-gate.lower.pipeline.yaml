@@ -18,6 +18,12 @@ pipeline:
     - name: POSTMAN_COLLECTION_ID
       type: String
       value: <+input>
+    - name: POSTMAN_COLLECTION_WORKSPACE_ID
+      type: String
+      value: <+input>
+    - name: POSTMAN_COLLECTION_SHA256
+      type: String
+      value: <+input>
   stages:
     - stage:
         name: Contract - Consumer and route gate
@@ -138,7 +144,9 @@ pipeline:
                           --collection '<+pipeline.variables.POSTMAN_COLLECTION_ID>' \
                           --base-url '<+stage.variables.app_base_url>' \
                           --out-dir .contract-reports/postman \
-                          --cloud
+                          --cloud \
+                          --workspace-id '<+pipeline.variables.POSTMAN_COLLECTION_WORKSPACE_ID>' \
+                          --expected-sha256 '<+pipeline.variables.POSTMAN_COLLECTION_SHA256>'
                       else
                         node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
                           --collection fixtures/paypal/orders-lower.postman_collection.json \

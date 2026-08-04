@@ -86,8 +86,11 @@ pipeline. `cloneCodebase: true` now checks out the customer repository. The stag
 3. runs an explicitly supplied local or Postman Cloud collection; and
 4. seals the bundle attestation with the JSON/JUnit evidence.
 
-There is no fallback to an Orders demo collection in this stage. Set either
-`postman_collection_path` or `postman_collection_id` for the real service.
+There is no fallback to an Orders demo collection in this stage. Set
+`postman_collection_path` for a reviewed local Collection. For Cloud mode, set
+`postman_collection_id`, `postman_collection_workspace_id`, and the reviewed
+canonical digest in `postman_collection_sha256`; the gate proves all three before
+running a sealed local snapshot.
 
 ## 5. Reproduce the downstream acceptance proof
 
@@ -107,6 +110,14 @@ repositories, vendors the bundle into each, and proves:
 - a tampered downstream bundle fails attestation.
 
 Evidence is written to `.contract-reports/downstream-adoption/`.
+
+On a clean checkout, the adoption proof source-attests the actual Postman-CS
+checkout at its current `HEAD` before vending. A maintainer's dirty working tree
+cannot produce source-attestation evidence. In that case the script labels the
+run `functional-snapshot-not-source-attestation`, exercises the uncommitted
+functionality separately, and records `sourceAttested: false`. CI therefore
+tests the production attestation path from the real clean checkout, while local
+pre-commit runs cannot masquerade as trusted source provenance.
 
 This is deliberately labeled **phase 0: static BDC plus Git ledger**. It proves
 the delivery boundary and deployment decision semantics, but it is not a

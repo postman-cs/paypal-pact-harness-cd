@@ -86,19 +86,23 @@ See [`harness/IMPORT.md`](harness/IMPORT.md):
 - `harness/contract-gate.self-test.pipeline.yaml` — zero-secret Harness Cloud proof, usable
   while a Kubernetes delegate is unavailable.
 - `harness/contract-gate.real-consumer.pipeline.yaml` — Postman-backed phase-0 shared-ledger
-  shape, retained as an offline/low-infrastructure demonstration.
+  shape with workspace-bound, canonical-digest-pinned consumer Collection and
+  provider OAS inputs, retained as an offline/low-infrastructure demonstration.
 - `harness/contract-gate.broker.pipeline.yaml` — complete lower-environment integration proof:
   Postman dual-OAS/static gates → Pact publish → official provider verification → Broker
-  `can-i-deploy` (with no fake deployment or premature deployment record).
+  `can-i-deploy` (with an independently reviewed source SHA, explicit logical Pact
+  branches, and no fake deployment or premature deployment record).
 
 The complete component map and execution sequence are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 For PayPal's requested production CDC shape, use the five additional stage objects:
 
-- `postman-oas-preflight.yaml` pulls the consumer and provider OAS documents from
-  their declared Postman workspaces and runs the existing static BDC gate;
-- `pact-consumer-publish.yaml` publishes pacts produced by executable consumer tests;
+- `postman-oas-preflight.yaml` pulls each consumer and provider OAS from its exact
+  single ROOT file, verifies workspace membership and its reviewed canonical
+  digest, and runs the existing static BDC gate;
+- `pact-consumer-publish.yaml` creates a fresh run directory and publishes only
+  non-empty pacts produced there by executable consumer tests;
 - `pact-provider-verify.yaml` runs official verification with selectors, provider
   states, pending/WIP pacts, and result publication;
 - `pact-can-i-deploy.yaml` blocks an incompatible promotion; and
@@ -123,7 +127,8 @@ npm run test:all       # full local release gate
 The contract engine never needs `npm install` at runtime—it calls the committed
 `tools/pact-harness` bundle. The explicit Postman behavioral steps install the exact
 Postman CLI release into the non-root build workspace; maintainers use `npm install`
-only for tests or rebuilding the static bundle.
+only for tests or rebuilding the static bundle. Retained Postman JSON, JUnit, and
+text reporter artifacts are credential-redacted and re-sealed before publication.
 
 ## Layout
 

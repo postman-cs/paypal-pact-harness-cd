@@ -32,6 +32,8 @@
     "enabled": false,
     "collection": "fixtures/paypal/orders-lower.postman_collection.json",
     "baseUrl": "",
-    "cloud": false
+    "cloud": false,
+    "workspaceId": "",
+    "collectionSha256": ""
   }
 }

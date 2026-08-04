@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reconciledAt": "2026-08-04T00:38:30.401Z",
+  "reconciledAt": "2026-08-04T02:06:24.859Z",
   "apiBase": "https://api.postman.com",
   "consumer": {
     "participant": "orders-checkout-consumer",
@@ -13,17 +13,22 @@
       "action": "updated",
       "id": "f36470ce-34e2-4675-9566-7fc15dcb2e10",
       "name": "checkout-consumer",
+      "rootFilePath": "openapi.json",
+      "sha256": "9c57ee6040d107589b3e8e2f0a2719464ec6d87afda7bf7a8e60b2077fb39d2e",
+      "canonicalSha256": "f1360361b193c9f4680e6d9ae183e3e4a3f2fcdfbe36c103d972911bc6cb50d2",
       "fixture": "fixtures/paypal/checkout-consumer-oas.json",
       "title": "checkout-consumer",
       "version": "1.0.0",
-      "sourceSha256": "9c57ee6040d107589b3e8e2f0a2719464ec6d87afda7bf7a8e60b2077fb39d2e"
+      "sourceSha256": "9c57ee6040d107589b3e8e2f0a2719464ec6d87afda7bf7a8e60b2077fb39d2e",
+      "sourceCanonicalSha256": "f1360361b193c9f4680e6d9ae183e3e4a3f2fcdfbe36c103d972911bc6cb50d2"
     },
     "collection": {
       "action": "updated",
       "uid": "55358385-9e0c23d2-2577-4544-bfdb-0bd934601405",
       "name": "orders-checkout-consumer",
       "fixture": "fixtures/paypal/orders-checkout-consumer.postman_collection.json",
-      "sourceSha256": "a6d8c412981be0645eb6ea7784ec8369e0cf374d6537a306f7a90d88b4c55632"
+      "sourceSha256": "a6d8c412981be0645eb6ea7784ec8369e0cf374d6537a306f7a90d88b4c55632",
+      "canonicalSha256": "c3540d6af7e4e7e0b300064455ea3d87447ff3ae056264d06209d29b2b2c97ca"
     }
   },
   "provider": {
@@ -37,17 +42,22 @@
       "action": "updated",
       "id": "68caf82a-3cad-481a-a87b-a87c0478ba19",
       "name": "Orders",
+      "rootFilePath": "openapi.json",
+      "sha256": "14db0b9e0d7440e38595b823724599edc7ab8b7a2b41ac442463e81b7d477fd6",
+      "canonicalSha256": "859d924aa5e1c96ba1eda467f564be571cf7ad494ac0814460110ba6f751a757",
       "fixture": "fixtures/paypal/checkout_orders_v2.json",
       "title": "Orders",
       "version": "2.32",
-      "sourceSha256": "14db0b9e0d7440e38595b823724599edc7ab8b7a2b41ac442463e81b7d477fd6"
+      "sourceSha256": "14db0b9e0d7440e38595b823724599edc7ab8b7a2b41ac442463e81b7d477fd6",
+      "sourceCanonicalSha256": "859d924aa5e1c96ba1eda467f564be571cf7ad494ac0814460110ba6f751a757"
     },
     "collection": {
       "action": "updated",
       "uid": "55358385-070f346f-4c4b-4621-8871-908ceb21341d",
       "name": "PayPal Orders lower-environment contract proof",
       "fixture": "fixtures/paypal/orders-lower.postman_collection.json",
-      "sourceSha256": "ac1c458a7f697a1f8c5ea65214e7d39a843fefcd330d024c546db2e9caa19d3c"
+      "sourceSha256": "ac1c458a7f697a1f8c5ea65214e7d39a843fefcd330d024c546db2e9caa19d3c",
+      "canonicalSha256": "4de8a4c22ce8d04dc673544905f693ae4945bb2970376ef6305a9e888ff191d9"
     }
   }
 }

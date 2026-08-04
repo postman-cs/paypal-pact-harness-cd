@@ -129,13 +129,14 @@ export function verifyInteraction(oas, interaction, policy = {}) {
   //    with a compatible type. (The consumer's example response = what it depends on.)
   //    `fields` records the per-field verdict so a UI can render field-by-field.
   const fields = [];
-  if (res.body !== undefined && res.body !== null && typeof res.body !== 'string') {
+  const responseContentType = String(headerValue(res.headers, 'content-type') ?? '').toLowerCase();
+  const bodyIsShapeBearing = typeof res.body !== 'string' || responseContentType.includes('json');
+  if (res.body !== undefined && res.body !== null && bodyIsShapeBearing) {
     const schema = responseSchemaFor(oas, operation, res.status);
     if (!schema) {
       failures.push({ check: 'response-body-schema', detail: `provider documents no ${statusKey} JSON body schema, but the consumer relies on one` });
     } else {
       for (const [fieldPath, consumerType] of Object.entries(expectedTypes(res.body))) {
-        if (fieldPath === '$') continue; // root container type is implied by its fields
         const found = schemaTypeAtPath(oas, schema, fieldPath);
         if (!found.found) {
           failures.push({ check: 'response-field-missing', detail: `${fieldPath}: ${found.reason} (consumer expects ${consumerType})` });

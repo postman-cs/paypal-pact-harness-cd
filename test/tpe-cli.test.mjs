@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -24,7 +25,8 @@ function run(args, env = {}) {
 }
 
 function tempConfig(mutator) {
-  const directory = mkdtempSync(join(ROOT, '.tpe-cli-'));
+  mkdirSync(join(ROOT, '.contract-reports'), { recursive: true });
+  const directory = mkdtempSync(join(ROOT, '.contract-reports', '.tpe-cli-'));
   const config = structuredClone(base);
   config.reports.directory = `${directory.slice(ROOT.length + 1)}/reports`;
   mutator?.(config);

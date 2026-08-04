@@ -1,5 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import {
+  assertDedicatedSubtreePath,
+  resolveDedicatedSubtreePath,
+} from './lib/path-safety.mjs';
 
 const TOP_LEVEL_KEYS = new Set([
   'schemaVersion',
@@ -24,7 +28,7 @@ const SECTION_KEYS = {
   ]),
   policy: new Set(['subset', 'contract', 'exceptions', 'route', 'completeResults']),
   reports: new Set(['directory']),
-  postman: new Set(['enabled', 'collection', 'baseUrl', 'cloud']),
+  postman: new Set(['enabled', 'collection', 'baseUrl', 'cloud', 'workspaceId', 'collectionSha256']),
 };
 
 function record(value, label) {
@@ -81,6 +85,26 @@ function confinedPath(root, value, label, { required = true, mustExist = true } 
     throw new Error(`${label} resolves outside the repository root`);
   }
   return { input, absolute: target };
+}
+
+export function assertSafeReportDirectory(root, target) {
+  return assertDedicatedSubtreePath({
+    root,
+    target,
+    subtree: '.contract-reports',
+    label: 'reports.directory',
+  });
+}
+
+function reportDirectory(root, value) {
+  const input = requiredText(value, 'reports.directory');
+  const absolute = resolveDedicatedSubtreePath({
+    root,
+    input,
+    subtree: '.contract-reports',
+    label: 'reports.directory',
+  });
+  return { input, absolute };
 }
 
 function httpUrl(value, label) {
@@ -161,10 +185,7 @@ export function validateTpeConfig(value, {
   const routePolicy = optionalText(policy.route, 'policy.route') || 'block';
   if (!['block', 'warn'].includes(routePolicy)) throw new Error('policy.route must be block or warn');
   const completeResults = boolean(policy.completeResults, 'policy.completeResults', true);
-  const reportDirectory = confinedPath(root, reports.directory, 'reports.directory', {
-    required: true,
-    mustExist: false,
-  });
+  const reportDirectoryPath = reportDirectory(root, reports.directory);
 
   const actuatorUrl = httpUrl(
     envOverride(env, 'PAYPAL_CONTRACT_ACTUATOR_URL', application.actuatorUrl),
@@ -203,11 +224,29 @@ export function validateTpeConfig(value, {
     'postman.baseUrl',
   );
   const postmanCloud = boolean(postman.cloud, 'postman.cloud', false);
+  const postmanWorkspaceId = envOverride(
+    env,
+    'PAYPAL_CONTRACT_POSTMAN_WORKSPACE_ID',
+    postman.workspaceId,
+  );
+  const postmanCollectionSha256 = envOverride(
+    env,
+    'PAYPAL_CONTRACT_POSTMAN_COLLECTION_SHA256',
+    postman.collectionSha256,
+  );
   if (postmanEnabled && !optionalText(postmanCollection, 'postman.collection')) {
     throw new Error('postman.collection is required when postman.enabled=true');
   }
   if (postmanEnabled && !postmanBaseUrl) {
     throw new Error('postman.baseUrl is required when postman.enabled=true');
+  }
+  if (postmanEnabled && postmanCloud) {
+    if (!/^[A-Za-z0-9_-]{3,200}$/.test(postmanWorkspaceId ?? '')) {
+      throw new Error('postman.workspaceId is required when postman.cloud=true');
+    }
+    if (!/^[a-f0-9]{64}$/.test(postmanCollectionSha256 ?? '')) {
+      throw new Error('postman.collectionSha256 is required when postman.cloud=true');
+    }
   }
 
   return {
@@ -240,13 +279,15 @@ export function validateTpeConfig(value, {
       completeResults,
     },
     reports: {
-      directory: reportDirectory,
+      directory: reportDirectoryPath,
     },
     postman: {
       enabled: postmanEnabled,
       collection: optionalText(postmanCollection, 'postman.collection'),
       baseUrl: postmanBaseUrl,
       cloud: postmanCloud,
+      workspaceId: optionalText(postmanWorkspaceId, 'postman.workspaceId'),
+      collectionSha256: optionalText(postmanCollectionSha256, 'postman.collectionSha256'),
     },
   };
 }

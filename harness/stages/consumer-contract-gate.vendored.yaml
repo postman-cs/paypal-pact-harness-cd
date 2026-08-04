@@ -43,6 +43,12 @@ stage:
     - name: postman_collection_id
       type: String
       value: <+input>.default("")
+    - name: postman_collection_workspace_id
+      type: String
+      value: <+input>.default("")
+    - name: postman_collection_sha256
+      type: String
+      value: <+input>.default("")
   spec:
     cloneCodebase: true
     platform:
@@ -126,6 +132,8 @@ stage:
                 APP_BASE_URL: <+stage.variables.app_base_url>
                 POSTMAN_COLLECTION_PATH: <+stage.variables.postman_collection_path>
                 POSTMAN_COLLECTION_ID: <+stage.variables.postman_collection_id>
+                POSTMAN_COLLECTION_WORKSPACE_ID: <+stage.variables.postman_collection_workspace_id>
+                POSTMAN_COLLECTION_SHA256: <+stage.variables.postman_collection_sha256>
                 POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                 CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
@@ -144,7 +152,10 @@ stage:
                   --collection "$COLLECTION" \
                   --base-url "$APP_BASE_URL" \
                   --out-dir .contract-reports/postman
-                [ -z "$POSTMAN_COLLECTION_ID" ] || set -- "$@" --cloud
+                [ -z "$POSTMAN_COLLECTION_ID" ] || set -- "$@" \
+                  --cloud \
+                  --workspace-id "$POSTMAN_COLLECTION_WORKSPACE_ID" \
+                  --expected-sha256 "$POSTMAN_COLLECTION_SHA256"
                 node "$BUNDLE_PATH/scripts/postman/run-lower-collection.mjs" "$@"
               reports:
                 type: JUnit

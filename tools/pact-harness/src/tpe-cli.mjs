@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadTpeConfig } from './tpe-config.mjs';
+import { assertSafeReportDirectory, loadTpeConfig } from './tpe-config.mjs';
 
 const SOURCE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -231,7 +231,11 @@ function runPostman(config, paths, inputs) {
     '--base-url', config.postman.baseUrl,
     '--out-dir', join(inputs.reports, 'postman'),
   ];
-  if (config.postman.cloud) args.push('--cloud');
+  if (config.postman.cloud) args.push(
+    '--cloud',
+    '--workspace-id', config.postman.workspaceId,
+    '--expected-sha256', config.postman.collectionSha256,
+  );
   return run(process.execPath, args, { cwd: config.root });
 }
 
@@ -260,8 +264,9 @@ export function sealEvidence(reportDirectory) {
 
 async function verify(config, paths = runtimePaths(), { clean = false } = {}) {
   const { inputs } = doctor(config, paths);
-  if (clean) rmSync(config.reports.directory.absolute, { recursive: true, force: true });
-  mkdirSync(config.reports.directory.absolute, { recursive: true });
+  const reportDirectory = assertSafeReportDirectory(config.root, config.reports.directory.absolute);
+  if (clean) rmSync(reportDirectory, { recursive: true, force: true });
+  mkdirSync(reportDirectory, { recursive: true });
   const pact = normalizeConsumer(config, paths, inputs);
   const routes = collectLiveRoutes(config, paths, inputs);
   const exits = [

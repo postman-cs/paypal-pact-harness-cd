@@ -1,85 +1,182 @@
 #!/usr/bin/env node
-// CLI-first IO plane (Decision D9): pull the consumer collection and the provider
-// OAS via the signed Postman CLI so our pure transformer/verifier consume exactly
-// what Postman produces. This wrapper shells to `postman`; it does not reimplement
-// Postman. The runner provides a reviewed CLI version (no `curl | sh`).
-//
-//   node scripts/postman/pull-artifacts.mjs \
-//     --collection-uid <uid> --spec-id <id> --out-dir .local
-//
-// Emits: <out-dir>/collection.json  and  <out-dir>/provider-oas.yaml
-//
-// Notes:
-//  - `postman login` / workspace discovery must already be done by the runner
-//    (POSTMAN_API_KEY in env, exactly as the provider-side harness expects).
-//  - Collection EXPORT to a file is the one lifecycle op the CLI does not expose
-//    cleanly, so it uses the documented public API GET (the same carve-out the
-//    harness makes: "raw API only where the CLI has no primitive"). Spec pull uses
-//    `postman spec` directly.
 
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseDoc } from '../../src/lib/load.mjs';
+import {
+  assertCollectionCanonicalDigest,
+  requireCollectionCanonicalSha256,
+} from './collection-canonical.mjs';
+import { postmanApiUrl, validatePostmanApiBase } from './postman-api-base.mjs';
+import { requestPostmanJson } from './pull-workspace-oas.mjs';
+import { assertCanonicalDigest, pullSingleRootSpecFile } from './spec-file.mjs';
 
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+function arg(name, fallback) {
+  const index = process.argv.indexOf(`--${name}`);
+  return index >= 0 ? process.argv[index + 1] : fallback;
 }
 
-function run(cmd, args) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', shell: process.platform === 'win32' });
-  if (r.status !== 0) {
-    console.error(`[pull] \`${cmd} ${args.join(' ')}\` failed (status ${r.status}):\n${r.stderr || r.stdout}`);
-    process.exit(r.status ?? 1);
+function required(value, label) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{3,200}$/.test(value)) {
+    throw new Error(`${label} is required and contains invalid characters`);
   }
-  return r.stdout;
+  return value;
 }
 
-async function fetchJson(url, apiKey, attempts = 4) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch(url, {
-        headers: { 'X-Api-Key': apiKey },
-        signal: controller.signal,
-        redirect: 'error',
-      });
-      if (response.ok) return response.json();
-      lastError = new Error(`Postman API returned HTTP ${response.status}`);
-      if (response.status < 500 && response.status !== 429) break;
-    } catch (error) {
-      lastError = error;
-    } finally {
-      clearTimeout(timer);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** (attempt - 1))));
+function atomicWrite(path, content) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.part-${process.pid}`;
+  try {
+    writeFileSync(temporary, content, { mode: 0o600 });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
   }
-  throw new Error(`Postman collection export failed: ${lastError?.message ?? 'unknown error'}`);
 }
 
-const outDir = arg('out-dir') || '.local';
-const collectionUid = arg('collection-uid');
-const specId = arg('spec-id');
-mkdirSync(outDir, { recursive: true });
-
-// 1. Provider OAS via the Postman CLI (Spec Hub) — CLI primitive, D9.
-if (specId) {
-  const specPath = join(outDir, 'provider-oas.yaml');
-  // `postman spec pull` writes the spec files; adapt the flags to the installed CLI.
-  run('postman', ['spec', 'pull', specId, '--output', specPath]);
-  console.log(`[pull] provider OAS -> ${specPath}`);
+function digest(content) {
+  return createHash('sha256').update(content).digest('hex');
 }
 
-// 2. Consumer collection export — lifecycle carve-out (documented public API GET).
-if (collectionUid) {
-  const key = process.env.POSTMAN_API_KEY;
-  if (!key) { console.error('[pull] POSTMAN_API_KEY required to export the collection'); process.exit(2); }
-  const body = await fetchJson(`https://api.getpostman.com/collections/${encodeURIComponent(collectionUid)}`, key);
-  const collection = body.collection;
-  if (!collection || typeof collection !== 'object') throw new Error('Postman API response did not contain a collection');
+async function assertWorkspaceMembership({ kind, id, workspaceId, request, apiBase }) {
+  const url = postmanApiUrl('/workspaces', apiBase);
+  url.searchParams.set('elementType', kind);
+  url.searchParams.set('elementId', id);
+  url.searchParams.set('limit', '100');
+  const body = await request(url);
+  if (!Array.isArray(body?.workspaces)) {
+    throw new Error(`Postman ${kind} workspace response is malformed`);
+  }
+  if (!body.workspaces.some((workspace) => workspace?.id === workspaceId)) {
+    throw new Error(`${kind} ${id} is not in expected workspace ${workspaceId}`);
+  }
+}
+
+export async function pullPostmanArtifacts({
+  collectionUid,
+  collectionWorkspaceId,
+  specId,
+  specWorkspaceId,
+  expectedCollectionCanonicalSha256,
+  expectedSpecCanonicalSha256,
+  outDir = '.local',
+  apiKey,
+  apiBase = 'https://api.postman.com',
+  fetchImpl = fetch,
+  sleepImpl,
+  now = () => new Date(),
+} = {}) {
+  const ids = {
+    collectionUid: required(collectionUid, 'collection UID'),
+    collectionWorkspaceId: required(collectionWorkspaceId, 'collection workspace ID'),
+    specId: required(specId, 'specification ID'),
+    specWorkspaceId: required(specWorkspaceId, 'specification workspace ID'),
+  };
+  if (!apiKey) throw new Error('POSTMAN_API_KEY is required');
+  requireCollectionCanonicalSha256(
+    expectedCollectionCanonicalSha256,
+    'consumer collection approved canonical digest',
+  );
+  const base = validatePostmanApiBase(apiBase);
+  const request = (url) => requestPostmanJson(url, { apiKey, fetchImpl, sleepImpl });
+
+  await Promise.all([
+    assertWorkspaceMembership({
+      kind: 'collection', id: ids.collectionUid,
+      workspaceId: ids.collectionWorkspaceId, request, apiBase: base,
+    }),
+    assertWorkspaceMembership({
+      kind: 'specification', id: ids.specId,
+      workspaceId: ids.specWorkspaceId, request, apiBase: base,
+    }),
+  ]);
+  const [collectionBody, exactSpec] = await Promise.all([
+    request(postmanApiUrl(`/collections/${encodeURIComponent(ids.collectionUid)}`, base)),
+    pullSingleRootSpecFile({
+      specId: ids.specId,
+      apiBase: base,
+      request,
+      label: 'provider specification',
+    }),
+  ]);
+
+  const collection = collectionBody?.collection;
+  if (
+    typeof collection?.info?.name !== 'string' ||
+    !collection.info.name.trim() ||
+    !Array.isArray(collection.item)
+  ) {
+    throw new Error('Postman collection response was empty or malformed');
+  }
+  const collectionCanonicalSha256 = assertCollectionCanonicalDigest({
+    collection,
+    expected: expectedCollectionCanonicalSha256,
+    label: 'consumer collection',
+  });
+  const definition = exactSpec.content;
+  const document = parseDoc(definition);
+  const version = document?.openapi ?? document?.swagger;
+  if (
+    typeof version !== 'string' ||
+    !/^(2\.0|3\.\d+\.\d+)$/.test(version) ||
+    typeof document.info?.title !== 'string' ||
+    !document.info.title.trim() ||
+    !document.paths ||
+    typeof document.paths !== 'object' ||
+    Array.isArray(document.paths)
+  ) {
+    throw new Error('Postman specification is not a valid OpenAPI document');
+  }
+  const canonicalSha256 = assertCanonicalDigest({
+    content: definition,
+    expected: expectedSpecCanonicalSha256,
+    label: 'provider specification',
+  });
+
+  const collectionContent = `${JSON.stringify(collection, null, 2)}\n`;
+  const specContent = definition.endsWith('\n') ? definition : `${definition}\n`;
   const collectionPath = join(outDir, 'collection.json');
-  writeFileSync(collectionPath, JSON.stringify(collection, null, 2) + '\n');
-  console.log(`[pull] consumer collection -> ${collectionPath}`);
+  const specPath = join(outDir, 'provider-oas.yaml');
+  atomicWrite(collectionPath, collectionContent);
+  atomicWrite(specPath, specContent);
+  const manifest = {
+    schemaVersion: 1,
+    retrievedAt: now().toISOString(),
+    apiBase: base.origin,
+    artifacts: [
+      {
+        kind: 'collection', id: ids.collectionUid, workspaceId: ids.collectionWorkspaceId,
+        name: collection.info.name, path: collectionPath,
+        bytes: Buffer.byteLength(collectionContent), sha256: digest(collectionContent),
+        canonicalSha256: collectionCanonicalSha256,
+      },
+      {
+        kind: 'specification', id: ids.specId, workspaceId: ids.specWorkspaceId,
+        name: document.info.title, openapiVersion: version, path: specPath,
+        rootFilePath: exactSpec.path, bytes: Buffer.byteLength(specContent),
+        sha256: digest(specContent), canonicalSha256,
+      },
+    ],
+  };
+  const manifestPath = join(outDir, 'postman-artifact-provenance.json');
+  atomicWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return { ...manifest, manifestPath };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  const result = await pullPostmanArtifacts({
+    collectionUid: arg('collection-uid'),
+    collectionWorkspaceId: arg('collection-workspace-id'),
+    specId: arg('spec-id'),
+    specWorkspaceId: arg('spec-workspace-id'),
+    expectedCollectionCanonicalSha256: arg('expected-collection-canonical-sha256'),
+    expectedSpecCanonicalSha256: arg('expected-spec-canonical-sha256'),
+    outDir: arg('out-dir', '.local'),
+    apiKey: process.env.POSTMAN_API_KEY,
+    apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
+  });
+  console.log(`[pull] collection + provider OAS -> ${result.artifacts[0].path}, ${result.artifacts[1].path}`);
+  console.log(`[pull] provenance -> ${result.manifestPath}`);
 }

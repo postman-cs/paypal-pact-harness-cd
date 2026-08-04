@@ -43,13 +43,20 @@ function fixture(remote = 'https://github.com/postman-cs/paypal-pact-harness-cd.
     name: 'pact-harness-bundle',
     version: '0.4.0',
   }));
+  const cli = join(root, 'tools', 'pact-harness', 'pact-harness.mjs');
+  writeFileSync(cli, 'export const cli = true;\n');
   git(root, 'init', '-b', 'main');
   git(root, 'config', 'user.email', 'contract-ci@example.invalid');
   git(root, 'config', 'user.name', 'Contract CI');
   git(root, 'remote', 'add', 'origin', remote);
   git(root, 'add', '.');
   git(root, 'commit', '-m', 'fixture');
-  return { root, commit: git(root, 'rev-parse', 'HEAD'), comparator: join(vendor, 'compare-routes.mjs') };
+  return {
+    root,
+    commit: git(root, 'rev-parse', 'HEAD'),
+    comparator: join(vendor, 'compare-routes.mjs'),
+    cli,
+  };
 }
 
 function run(root, expectedCommit) {
@@ -78,19 +85,41 @@ test('source attestation rejects a wrong repository without echoing credentials'
   const { root, commit } = fixture('https://token-do-not-log@github.com/paypal/paypal-pact-harness-cd.git');
   const result = run(root, commit);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /expected github\.com\/postman-cs\/paypal-pact-harness-cd/);
+  assert.match(result.stderr, /must not contain embedded credentials/);
   assert.doesNotMatch(result.stderr, /token-do-not-log/);
 });
 
-test('source attestation rejects a different commit and a tampered comparator', () => {
+test('source attestation rejects insecure transport and nonstandard SSH identities', () => {
+  for (const remote of [
+    'http://github.com/postman-cs/paypal-pact-harness-cd.git',
+    'attacker@github.com:postman-cs/paypal-pact-harness-cd.git',
+  ]) {
+    const { root, commit } = fixture(remote);
+    const result = run(root, commit);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must use HTTPS or SSH|unsupported SSH identity/);
+  }
+});
+
+test('source attestation rejects a different commit and a modified protected file', () => {
   const first = fixture();
   const wrongCommit = run(first.root, '0'.repeat(40));
   assert.notEqual(wrongCommit.status, 0);
   assert.match(wrongCommit.stderr, /expected commit/);
 
   const second = fixture();
-  writeFileSync(second.comparator, 'tampered\n');
+  writeFileSync(second.cli, 'tampered\n');
   const tampered = run(second.root, second.commit);
   assert.notEqual(tampered.status, 0);
-  assert.match(tampered.stderr, /comparator digest does not match/);
+  assert.match(tampered.stderr, /protected harness source differs/);
+});
+
+test('source attestation rejects untracked bundle content without echoing its filename', () => {
+  const { root, commit } = fixture();
+  const hostileName = 'do-not-log-secret-material.mjs';
+  writeFileSync(join(root, 'tools', 'pact-harness', hostileName), 'malicious\n');
+  const result = run(root, commit);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /protected harness source differs/);
+  assert.doesNotMatch(result.stderr, new RegExp(hostileName));
 });

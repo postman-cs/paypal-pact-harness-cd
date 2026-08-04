@@ -11,14 +11,34 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const metadata = JSON.parse(readFileSync(join(root, 'dist', 'release-metadata.json'), 'utf8'));
+if (
+  metadata.schemaVersion !== 1 ||
+  typeof metadata.filename !== 'string' ||
+  basename(metadata.filename) !== metadata.filename ||
+  !/^[A-Za-z0-9._-]+\.tgz$/.test(metadata.filename) ||
+  !/^[a-f0-9]{64}$/.test(metadata.sha256 ?? '') ||
+  !Number.isSafeInteger(metadata.bytes) ||
+  metadata.bytes <= 0
+) {
+  throw new Error('packed bundle release metadata is invalid');
+}
 const archive = join(root, 'dist', metadata.filename);
-const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
+const archiveContent = readFileSync(archive);
+if (archiveContent.length !== metadata.bytes) {
+  throw new Error(`packed bundle byte count mismatch: ${archiveContent.length}`);
+}
+const actual = createHash('sha256').update(archiveContent).digest('hex');
 if (actual !== metadata.sha256) throw new Error(`packed bundle digest mismatch: ${actual}`);
+const checksum = readFileSync(join(root, 'dist', 'SHA256SUMS'), 'utf8');
+const expectedChecksum = `${metadata.sha256}  ${metadata.filename}\n`;
+if (checksum !== expectedChecksum) {
+  throw new Error('packed bundle SHA256SUMS differs from release metadata');
+}
 
 const temporary = mkdtempSync(join(tmpdir(), 'paypal tpe packed-'));
 const extract = join(temporary, 'extract');
@@ -69,7 +89,7 @@ try {
       route: 'block',
       completeResults: true,
     },
-    reports: { directory: 'reports' },
+    reports: { directory: '.contract-reports/packed' },
     postman: { enabled: false, collection: '', baseUrl: '', cloud: false },
   }, null, 2)}\n`);
 
@@ -80,7 +100,7 @@ try {
   const verify = run(process.execPath, [entry, 'verify', '--config', 'contract-gate.json', '--clean'], workspace);
   if (verify.status !== 0) throw new Error(verify.stderr || verify.stdout || 'packed verify failed');
   if (!/\[PASS\] PayPal contract gate/.test(verify.stdout)) throw new Error('packed verify did not report PASS');
-  if (!existsSync(join(workspace, 'reports', 'evidence-manifest.json'))) throw new Error('packed verify emitted no evidence manifest');
+  if (!existsSync(join(workspace, '.contract-reports', 'packed', 'evidence-manifest.json'))) throw new Error('packed verify emitted no evidence manifest');
 
   const comparator = join(bundle, 'vendor', 'postman-cs', 'compare-routes.mjs');
   writeFileSync(comparator, `${readFileSync(comparator, 'utf8')}\n// tampered by package test\n`);

@@ -16,7 +16,7 @@ stage:
     - name: harness_source_ref
       type: String
       required: true
-      value: <+input>.default(main)
+      value: <+input>
     - name: harness_source_commit
       type: String
       required: true
@@ -29,11 +29,19 @@ stage:
       type: String
       required: true
       value: <+input>
+    - name: consumer_spec_canonical_sha256
+      type: String
+      required: true
+      value: <+input>
     - name: provider_workspace_id
       type: String
       required: true
       value: <+input>
     - name: provider_spec_id
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_spec_canonical_sha256
       type: String
       required: true
       value: <+input>
@@ -64,9 +72,9 @@ stage:
               connectorRef: <+stage.variables.harness_source_connector>
               repoName: postman-cs/paypal-pact-harness-cd
               build:
-                type: branch
+                type: tag
                 spec:
-                  branch: <+stage.variables.harness_source_ref>
+                  tag: <+stage.variables.harness_source_ref>
               cloneDirectory: .pact-harness-source
               depth: 1
         - step:
@@ -101,8 +109,10 @@ stage:
                 POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                 CONSUMER_WORKSPACE_ID: <+stage.variables.consumer_workspace_id>
                 CONSUMER_SPEC_ID: <+stage.variables.consumer_spec_id>
+                CONSUMER_SPEC_CANONICAL_SHA256: <+stage.variables.consumer_spec_canonical_sha256>
                 PROVIDER_WORKSPACE_ID: <+stage.variables.provider_workspace_id>
                 PROVIDER_SPEC_ID: <+stage.variables.provider_spec_id>
+                PROVIDER_SPEC_CANONICAL_SHA256: <+stage.variables.provider_spec_canonical_sha256>
                 CONSUMER_NAME: <+stage.variables.consumer_name>
                 PROVIDER_NAME: <+stage.variables.provider_name>
                 CONTRACT_POLICY_PATH: <+stage.variables.contract_policy_path>
@@ -115,9 +125,13 @@ stage:
                 node .pact-harness-source/tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
                   --consumer-workspace-id "$CONSUMER_WORKSPACE_ID" \
                   --consumer-spec-id "$CONSUMER_SPEC_ID" \
+                  --consumer-expected-canonical-sha256 "$CONSUMER_SPEC_CANONICAL_SHA256" \
                   --provider-workspace-id "$PROVIDER_WORKSPACE_ID" \
                   --provider-spec-id "$PROVIDER_SPEC_ID" \
+                  --provider-expected-canonical-sha256 "$PROVIDER_SPEC_CANONICAL_SHA256" \
                   --out-dir "$INPUTS"
+                unset POSTMAN_API_KEY
+                unset POSTMAN_API_KEY
                 cp "$INPUTS/postman-oas-provenance.json" \
                   "$REPORTS/postman-oas-provenance.json"
 

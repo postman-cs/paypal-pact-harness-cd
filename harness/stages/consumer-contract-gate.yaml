@@ -16,7 +16,7 @@ stage:
     - name: harness_source_ref
       type: String
       required: true
-      value: <+input>.default(main)
+      value: <+input>
     - name: harness_source_commit
       type: String
       required: true
@@ -37,7 +37,18 @@ stage:
       type: String
       required: true
       value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs)
-    - name: postman_collection_id
+    - name: postman_collection
+      type: String
+      required: true
+      value: <+input>
+    - name: postman_cloud
+      type: String
+      required: true
+      value: <+input>.default(true)
+    - name: postman_collection_workspace_id
+      type: String
+      value: <+input>.default("")
+    - name: postman_collection_sha256
       type: String
       value: <+input>.default("")
   spec:
@@ -55,9 +66,9 @@ stage:
               connectorRef: <+stage.variables.harness_source_connector>
               repoName: postman-cs/paypal-pact-harness-cd
               build:
-                type: branch
+                type: tag
                 spec:
-                  branch: <+stage.variables.harness_source_ref>
+                  tag: <+stage.variables.harness_source_ref>
               cloneDirectory: .pact-harness-source
               depth: 1
         - step:
@@ -72,9 +83,10 @@ stage:
                 EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
               command: |
                 set -eu
-                cd .pact-harness-source
-                node scripts/ci/attest-harness-source.mjs \
-                  --expected-commit "$EXPECTED_SOURCE_COMMIT"
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
               resources:
                 limits:
                   memory: 500Mi
@@ -94,20 +106,19 @@ stage:
                 INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
-                cd .pact-harness-source
-                node paypal-contract-gate.mjs verify \
+                node .pact-harness-source/paypal-contract-gate.mjs verify \
                   --config "$CONFIG_PATH" \
                   --clean
               reports:
                 type: JUnit
                 spec:
                   paths:
-                    - .pact-harness-source/.contract-reports/contract-gate-summary.xml
-                    - .pact-harness-source/.contract-reports/oas-audit.xml
-                    - .pact-harness-source/.contract-reports/oas-diff.xml
-                    - .pact-harness-source/.contract-reports/consumer-bdc.xml
-                    - .pact-harness-source/.contract-reports/route-contract.xml
-                    - .pact-harness-source/.contract-reports/generated-openapi-route-contract.xml
+                    - .contract-reports/contract-gate-summary.xml
+                    - .contract-reports/oas-audit.xml
+                    - .contract-reports/oas-diff.xml
+                    - .contract-reports/consumer-bdc.xml
+                    - .contract-reports/route-contract.xml
+                    - .contract-reports/generated-openapi-route-contract.xml
               resources:
                 limits:
                   memory: 500Mi
@@ -122,30 +133,36 @@ stage:
               shell: Sh
               envVariables:
                 APP_BASE_URL: <+stage.variables.app_base_url>
-                POSTMAN_COLLECTION_ID: <+stage.variables.postman_collection_id>
+                POSTMAN_COLLECTION: <+stage.variables.postman_collection>
+                POSTMAN_CLOUD: <+stage.variables.postman_cloud>
+                POSTMAN_COLLECTION_WORKSPACE_ID: <+stage.variables.postman_collection_workspace_id>
+                POSTMAN_COLLECTION_SHA256: <+stage.variables.postman_collection_sha256>
                 POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                 CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
-                cd .pact-harness-source
                 export HOME="$PWD/.ci-home"
                 mkdir -p "$HOME"
                 npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
                 export PATH="$PWD/.postman-cli/bin:$PATH"
-                COLLECTION="$POSTMAN_COLLECTION_ID"
-                [ -n "$COLLECTION" ] ||
-                  COLLECTION=fixtures/paypal/orders-lower.postman_collection.json
+                case "$POSTMAN_CLOUD" in
+                  true|false) ;;
+                  *) echo "postman_cloud must be true or false" >&2; exit 2 ;;
+                esac
                 set -- \
-                  --collection "$COLLECTION" \
+                  --collection "$POSTMAN_COLLECTION" \
                   --base-url "$APP_BASE_URL" \
                   --out-dir .contract-reports/postman
-                [ -z "$POSTMAN_COLLECTION_ID" ] || set -- "$@" --cloud
-                node tools/pact-harness/scripts/postman/run-lower-collection.mjs "$@"
+                [ "$POSTMAN_CLOUD" = false ] || set -- "$@" \
+                  --cloud \
+                  --workspace-id "$POSTMAN_COLLECTION_WORKSPACE_ID" \
+                  --expected-sha256 "$POSTMAN_COLLECTION_SHA256"
+                node .pact-harness-source/tools/pact-harness/scripts/postman/run-lower-collection.mjs "$@"
               reports:
                 type: JUnit
                 spec:
                   paths:
-                    - .pact-harness-source/.contract-reports/postman/postman-run.xml
+                    - .contract-reports/postman/postman-run.xml
               resources:
                 limits:
                   memory: 500Mi
@@ -160,7 +177,6 @@ stage:
               shell: Sh
               command: |
                 set -eu
-                cd .pact-harness-source
                 node --input-type=module <<'NODE'
                 import { createHash } from 'node:crypto';
                 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

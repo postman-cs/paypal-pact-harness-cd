@@ -25,6 +25,8 @@ export function canonicalRepository(value) {
   let pathname;
   const scp = candidate.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
   if (scp && !candidate.includes('://')) {
+    const username = candidate.includes('@') ? candidate.slice(0, candidate.indexOf('@')) : '';
+    if (username && username !== 'git') fail('the checkout origin uses an unsupported SSH identity');
     [, host, pathname] = scp;
   } else {
     let url;
@@ -32,6 +34,15 @@ export function canonicalRepository(value) {
       url = new URL(candidate);
     } catch {
       fail('the checkout origin is not a supported Git URL');
+    }
+    if (!['https:', 'ssh:'].includes(url.protocol)) {
+      fail('the checkout origin must use HTTPS or SSH');
+    }
+    if (url.password || (url.protocol === 'https:' && url.username)) {
+      fail('the checkout origin must not contain embedded credentials');
+    }
+    if (url.protocol === 'ssh:' && url.username && url.username !== 'git') {
+      fail('the checkout origin uses an unsupported SSH identity');
     }
     host = url.hostname;
     pathname = url.pathname;
@@ -88,6 +99,21 @@ export function attest({ workspace, expectedCommit, output }) {
   const actualCommit = git(checkout, 'rev-parse', 'HEAD').toLowerCase();
   if (actualCommit !== normalizedExpectedCommit) {
     fail(`expected commit ${normalizedExpectedCommit}, checked out ${actualCommit}`);
+  }
+
+  const protectedTreeChanges = git(
+    checkout,
+    'status',
+    '--porcelain',
+    '--untracked-files=all',
+    '--',
+    'postman-cs.lock.json',
+    'tools/pact-harness',
+    'scripts/ci/attest-harness-source.mjs',
+  );
+  if (protectedTreeChanges) {
+    // Do not include porcelain output: a hostile filename could contain secret material.
+    fail('protected harness source differs from the attested commit');
   }
 
   const rootLock = readJson(resolve(checkout, 'postman-cs.lock.json'), 'root Postman-CS lock');

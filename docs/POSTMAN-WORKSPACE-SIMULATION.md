@@ -21,10 +21,14 @@ The default is a team workspace. For an individual API key that isn't operating
 in a team context, use `npm run postman:setup -- --workspace-type personal`.
 PayPal should keep the default and provision with its team/service-account key.
 
-`postman:verify` pulls both live OAS documents and both live Collections, proves
-that every asset belongs to its declared workspace, and records SHA-256
-provenance. It then runs two passing compatibility paths against the live
-provider OAS:
+`postman:verify` pulls the exact single `ROOT` file for both live OAS documents
+and both live Collections, proves that every asset belongs to its declared
+workspace, and records byte and canonical SHA-256 provenance. It rejects
+multi-file or ambiguous-root specifications and fails if either OAS canonical
+digest or either Collection canonical digest differs from the reviewed binding
+config. Collection drift is rejected before prior reports or input snapshots are
+changed. It then runs two passing
+compatibility paths against the live provider OAS:
 
 1. consumer OAS -> Pact-shaped contract -> static BDC verification
 2. consumer Collection examples -> Pact-shaped contract -> static BDC verification
@@ -35,8 +39,16 @@ fixture paths, and digests; it never contains the Postman API key.
 
 For Harness, map the generated IDs to `CONSUMER_WORKSPACE_ID`,
 `CONSUMER_SPEC_ID`, `PROVIDER_WORKSPACE_ID`, and `PROVIDER_SPEC_ID`. Use the
-provider Collection UID for the lower-environment Postman CLI step. Store the
-key only in `paypal_postman_service_account_pmak`.
+generated `sourceCanonicalSha256` values as the approved OAS digests. Use the
+consumer Collection's `canonicalSha256` as
+`CONSUMER_COLLECTION_CANONICAL_SHA256` in the real-consumer pipeline. Use the
+provider Collection UID, provider workspace ID, and its `canonicalSha256` for
+the lower-environment Postman CLI step. Each runner proves
+workspace membership and content, then executes a mode-`0600` sealed snapshot.
+After Postman CLI returns, JSON, JUnit, and retained text output are redacted and
+re-sealed; malformed reporter output or any credential that survives redaction
+fails the run and is removed.
+Store the key only in `paypal_postman_service_account_pmak`.
 
 This is deliberately labeled **phase 0**. It proves Postman-backed static
 bi-directional compatibility and prepares provider conformance execution. A

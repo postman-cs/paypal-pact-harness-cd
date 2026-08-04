@@ -15,9 +15,19 @@ contract generation and provider verification into one provider-owned pipeline.
 **Consumer repository:**
 
 1. `stages/postman-oas-preflight.yaml`
-2. the consumer's executable Pact test using its real client
-3. `stages/pact-consumer-publish.yaml`
-4. optional Postman CLI Collection checks
+2. `stages/pact-consumer-publish.yaml`, configured with the consumer's executable
+   Pact test command using its real client
+3. optional Postman CLI Collection checks
+
+The publish stage creates `pacts_path`, exports that exact path to the executable
+consumer test as `PACT_OUTPUT_DIR`, and publishes it in the same Harness CI stage.
+Supply a new, workspace-relative run directory for every execution, for example
+`pacts/<+pipeline.executionId>`; the stage refuses a pre-existing directory rather
+than deleting or trusting its contents. The consumer command must write its Pact
+files directly to `PACT_OUTPUT_DIR`. Publication fails if the command is a no-op,
+if no Pact JSON is produced, or if any Pact has zero executable interactions.
+This same-stage contract is required because Harness CI workspaces do not cross
+stage boundaries unless the customer adds an explicit artifact handoff.
 
 **Provider repository:**
 
@@ -43,6 +53,17 @@ Broker `can-i-deploy`. It intentionally does not deploy or call
 `record-deployment`; the committed Pact is integration-test evidence and must be
 replaced by consumer-repository executable Pact output in production.
 
+The complete Broker proof requires three inputs that are deliberately independent
+of the Harness trigger shape:
+
+- `REVIEWED_SOURCE_COMMIT`: the separately reviewed full SHA expected at `HEAD`;
+- `CONSUMER_PACT_BRANCH`: the logical consumer branch recorded in the Broker; and
+- `PROVIDER_PACT_BRANCH`: the logical provider branch used by verifier selectors.
+
+Set these values explicitly for branch, tag, pull-request, and manual runs. The
+selected Harness build ref only locates the checkout; it is not an approval signal,
+application version, or source of Pact branch metadata.
+
 ## Source checkout and portable CLI trust boundary
 
 Harness performs every Git checkout; the portable CLI never authenticates to or
@@ -52,7 +73,9 @@ clones Git by itself. Every complete pipeline in this repository fixes `repoName
 deployment decision step. The attestation fails closed unless all of these are true:
 
 - `origin` normalizes to `github.com/postman-cs/paypal-pact-harness-cd`;
-- checked-out `HEAD` is the full SHA supplied by `<+codebase.commitSha>`;
+- checked-out `HEAD` is the independently supplied full SHA (the complete Broker
+  proof uses `REVIEWED_SOURCE_COMMIT`; other templates use their documented
+  immutable commit input);
 - the committed portable bundle identifies itself as `pact-harness-bundle`; and
 - its Postman-CS comparator repository, commit, provenance, and SHA-256 all match
   `postman-cs.lock.json`.
@@ -71,7 +94,7 @@ Every runtime stage under `harness/stages/` except the explicitly offline
 application repo remains the pipeline codebase. Bind these three stage inputs:
 
 - `harness_source_connector`: the read-only Postman-CS GitHub connector;
-- `harness_source_ref`: `main` after merge, or the approved protected release branch;
+- `harness_source_ref`: the approved immutable release tag supplied by Postman-CS;
 - `harness_source_commit`: the exact full 40-character commit SHA expected at that ref.
 
 For these additional-clone steps, use an account-level GitHub connector whose
@@ -81,18 +104,21 @@ the runtime form. A repository-scoped connector may be used only after the
 Harness editor confirms the fixed `repoName` is accepted for that connector type.
 
 The second step attests the additional checkout before any Postman, Pact, provider,
-or deployment decision executes. A moved branch fails closed until the reviewed
-input set is updated to the new full commit.
+or deployment decision executes. A moved tag fails closed against the separately
+reviewed full commit. Never use a floating branch here: an older approved run must
+remain reproducible after development advances.
 
 ## A. PayPal TPE drop-in stage
 
 Import `harness/stages/consumer-contract-gate.yaml` before the existing promotion
 stage. The contract inputs are no longer individual Harness variables. They live
-in the reviewed `paypal-contract-gate.config.json` profile and the stage runs the
-same command a developer runs locally:
+in the PayPal application repository's reviewed `paypal-contract-gate.config.json`
+profile. The toolkit remains in the additional checkout, while the command runs
+from the customer repository root so paths cannot fall back to toolkit demos:
 
 ```bash
-node paypal-contract-gate.mjs verify --config paypal-contract-gate.config.json --clean
+node .pact-harness-source/paypal-contract-gate.mjs verify \
+  --config paypal-contract-gate.config.json --clean
 ```
 
 Supply only:
@@ -100,7 +126,10 @@ Supply only:
 - the repository codebase connector;
 - the KubernetesDirect connector and lower-environment namespace;
 - a registry connector for the Node runner image;
-- the lower-environment application, Actuator, and generated OpenAPI URLs; and
+- the lower-environment application, Actuator, and generated OpenAPI URLs;
+- the real application Collection path, or its Postman Cloud Collection UID,
+  expected workspace ID, and reviewed canonical SHA-256 plus the explicit
+  `postman_cloud` switch; and
 - project secrets `paypal_contract_demo_token` and
   `paypal_postman_service_account_pmak`.
 
@@ -108,10 +137,15 @@ The first validation is locked to `environment_name=lower`. The stage publishes
 consumer/audit/route/Postman JUnit, writes JSON for every module, and seals an
 evidence checksum manifest.
 
-If the lower pipeline uses a Postman Cloud collection, sync the POC collection into
-the shared team workspace by running
+There is no fallback to a toolkit demo profile or Collection. If the lower pipeline
+uses a Postman Cloud collection, sync the customer Collection into the shared team
+workspace by running
 `tools/pact-harness/scripts/postman/sync-cloud-collection.mjs` with the target
-workspace ID, then replace `POSTMAN_COLLECTION_ID`.
+workspace ID, then supply the returned UID as `postman_collection` and set
+`postman_cloud=true`. Also supply the workspace as
+`postman_collection_workspace_id` and the sync output's canonical digest as
+`postman_collection_sha256`. The runtime rechecks both before executing a sealed
+snapshot. For a customer-repository Collection path, set `postman_cloud=false`.
 
 ### Offline mirror exception
 
@@ -175,7 +209,7 @@ Secrets already used by this POC (project scope):
 | --- | --- |
 | `paypal_postman_service_account_pmak` | Postman CLI login, collection + both Spec Hub workspace reads |
 | `postman_cs_github_pat` | clone + push the optional shared contracts repo |
-| `paypal_pact_broker_token` | Pact publication, verification results, deploy decisions, deployment records |
+| `paypal_pact_broker_password` | OSS Broker basic-auth password for publication, verification results, deploy decisions, and deployment records |
 | `paypal_pact_provider_bearer_token` | Official verifier calls to the provider under test |
 
 The self-contained lower Broker proof uses `paypal_contract_demo_token` for both

@@ -70,13 +70,12 @@ flowchart TB
     Inventory["Bounded inventory collector<br/>retry, timeout, redirect denial,<br/>JSON validation, SHA-256 manifest"]
     PostmanCLI["Postman CLI 1.45.0<br/>positive + negative cases"]
     CloudCollection["Stable Postman Cloud collection"]
-    CloudHistory["Postman Cloud run history"]
+    SealedSnapshot["Digest-sealed local snapshot<br/>workspace + SHA provenance"]
 
     Spring --> Actuator --> Inventory
     Spring --> GeneratedOAS --> Inventory
-    CloudCollection --> PostmanCLI
+    CloudCollection --> SealedSnapshot --> PostmanCLI
     PostmanCLI -->|"bearer-authenticated loopback requests"| Spring
-    PostmanCLI --> CloudHistory
     Inventory --> Select --> RouteGate
   end
 
@@ -162,7 +161,7 @@ sequenceDiagram
   Pod->>Postman: Run stable collection with Postman CLI 1.45.0
   Postman->>App: Exercise 9 operations and auth-negative cases
   App-->>Postman: Schema-conformant responses
-  Postman-->>Evidence: 12 JUnit cases + JSON + Cloud run history
+  Postman-->>Evidence: 12 JUnit cases + JSON + collection provenance
   Evidence-->>Harness: Render test results
   Harness->>Pod: Clean up ephemeral build pod
 
@@ -180,7 +179,7 @@ sequenceDiagram
 | Repository bundle | Contract semantics and deterministic verdicts |
 | Consumer teams | Executable consumer intent: Pact, OAS subset, or Postman examples |
 | Provider/application teams | Candidate OAS and runtime implementation |
-| Postman | API collaboration artifacts, CLI execution, and Cloud run history |
+| Postman | API collaboration artifacts and CLI execution of a workspace- and digest-verified Collection snapshot |
 | GitHub | Source validation, portable packaging, failure proofs, evidence retention, and image publication |
 | Harness | Kubernetes execution, JUnit presentation, and deployment/promotion control |
 | Kubernetes | Ephemeral lower-environment runtime isolation |

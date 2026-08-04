@@ -29,7 +29,18 @@ test('Postman preflight retrieves both workspace-bound OAS documents with the se
 });
 
 test('consumer publication validates strict executable pacts with immutable version and branch metadata', () => {
-  const { source } = stage('pact-consumer-publish.yaml');
+  const { source, document } = stage('pact-consumer-publish.yaml');
+  const steps = document.stage.spec.execution.steps.map((entry) => entry.step.identifier);
+  const variables = Object.fromEntries(document.stage.variables.map((variable) => [variable.name, variable]));
+  assert.ok(steps.indexOf('generate_executable_consumer_pacts') < steps.indexOf('publish_validated_pacts'));
+  assert.match(source, /CONSUMER_CONTRACT_COMMAND/);
+  assert.match(source, /consumer-pact-run\.mjs/);
+  assert.match(source, /prepare "\$PACTS_PATH"/);
+  assert.match(source, /export PACT_OUTPUT_DIR="\$PACTS_PATH"/);
+  assert.match(source, /validate "\$PACTS_PATH"/);
+  assert.equal(variables.pacts_path.value, '<+input>');
+  assert.equal(variables.consumer_branch.value, '<+input>');
+  assert.doesNotMatch(source, /fixtures\/paypal\/orders-consumer\.pact\.json/);
   assert.match(source, /pact broker publish/);
   assert.match(source, /--consumer-app-version/);
   assert.match(source, /--branch/);
@@ -38,13 +49,21 @@ test('consumer publication validates strict executable pacts with immutable vers
 });
 
 test('provider verification uses broker selectors, pending and WIP pacts, states, and publishes evidence', () => {
-  const { source } = stage('pact-provider-verify.yaml');
+  const { source, document } = stage('pact-provider-verify.yaml');
   for (const flag of [
     '--consumer-version-selectors', '--enable-pending', '--include-wip-pacts-since',
     '--state-change-url', '--publish', '--provider-version', '--provider-branch',
     '--junit', '--json',
   ]) assert.match(source, new RegExp(flag));
   assert.doesNotMatch(source, /--ignore-no-pacts-error/);
+  assert.match(source, /wait-for-provider\.mjs/);
+  const variables = Object.fromEntries(document.stage.variables.map((variable) => [variable.name, variable]));
+  assert.equal(variables.provider_readiness_url.value, '<+input>');
+  assert.equal(variables.provider_hostname.value, '<+input>');
+  assert.equal(variables.provider_port.value, '<+input>');
+  assert.equal(variables.provider_transport.value, '<+input>');
+  assert.equal(variables.state_change_url.value, '<+input>');
+  assert.doesNotMatch(source, /default\(127\.0\.0\.1\)|default\(http:\/\/127\.0\.0\.1/);
 });
 
 test('deployment decision and deployment recording remain separate ordered responsibilities', () => {
@@ -69,7 +88,10 @@ test('all official Pact stages use the digest-locked installer and secrets are r
     const source = stage(name).source;
     assert.match(source, /install-pact-cli\.mjs/);
     assert.match(source, /pact-cli\.lock\.json/);
-    assert.match(source, /paypal_pact_broker_token/);
+    assert.match(source, /paypal_pact_broker_password/);
+    assert.match(source, /PACT_BROKER_USERNAME/);
+    assert.match(source, /PACT_BROKER_PASSWORD/);
+    assert.doesNotMatch(source, /PACT_BROKER_TOKEN/);
     assert.match(source, /PACT_DO_NOT_TRACK: "true"/);
   }
 
@@ -82,6 +104,9 @@ test('all official Pact stages use the digest-locked installer and secrets are r
 
 test('the lower Broker proof keeps Postman and static gates before every Broker decision', () => {
   const source = readFileSync(join(ROOT, 'harness', 'contract-gate.broker.pipeline.yaml'), 'utf8');
+  const pipeline = YAML.parse(source).pipeline;
+  const variables = Object.fromEntries(pipeline.variables.map((variable) => [variable.name, variable]));
+  assert.equal(pipeline.stages[0].stage.name, 'Consumer first Broker');
   const postman = source.indexOf('identifier: postman_static_preflight');
   const existing = source.indexOf('identifier: existing_postman_provider_gate');
   const publish = source.indexOf('identifier: publish_seeded_consumer_pact');
@@ -93,4 +118,14 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
     'the lower provider, static gate, and official verifier must share the demo credential');
   assert.doesNotMatch(source, /paypal_pact_provider_bearer_token/);
   assert.match(source, /production consumer\r?\n# repositories must publish pacts created by executable tests/);
+  assert.equal(variables.REVIEWED_SOURCE_COMMIT.value, '<+input>');
+  assert.equal(variables.CONSUMER_PACT_BRANCH.value, '<+input>');
+  assert.equal(variables.PROVIDER_PACT_BRANCH.value, '<+input>');
+  assert.match(source, /EXPECTED_SOURCE_COMMIT: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /CONSUMER_APP_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /PROVIDER_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /CONSUMER_PACT_BRANCH: <\+pipeline\.variables\.CONSUMER_PACT_BRANCH>/);
+  assert.match(source, /PROVIDER_PACT_BRANCH: <\+pipeline\.variables\.PROVIDER_PACT_BRANCH>/);
+  assert.doesNotMatch(source, /<\+codebase\.branch>/,
+    'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
 });

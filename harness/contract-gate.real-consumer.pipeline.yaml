@@ -15,12 +15,24 @@ pipeline:
         repoName: paypal-pact-harness-cd
         build: <+input>
   variables:
+    - name: CONSUMER_WORKSPACE_ID
+      type: String
+      value: <+input>
     - name: CONSUMER_COLLECTION_UID
+      type: String
+      value: <+input>
+    - name: CONSUMER_COLLECTION_CANONICAL_SHA256
+      type: String
+      value: <+input>          # reviewed canonical digest from the binding config
+    - name: PROVIDER_WORKSPACE_ID
       type: String
       value: <+input>
     - name: PROVIDER_SPEC_ID
       type: String
       value: <+input>
+    - name: PROVIDER_SPEC_CANONICAL_SHA256
+      type: String
+      value: <+input>          # reviewed canonical digest from the binding config
     - name: PROVIDER_NAME
       type: String
       value: paypal-orders
@@ -57,7 +69,7 @@ pipeline:
                       set -eu
                       node scripts/ci/attest-harness-source.mjs
               - step:
-                  name: Pull Postman artifacts (CLI-first) + build the pact
+                  name: Pull workspace-bound Postman artifacts + build the pact
                   identifier: pull_and_pact
                   type: Run
                   spec:
@@ -67,14 +79,15 @@ pipeline:
                       POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
                     command: |
                       set -eu
-                      export HOME="$PWD/.ci-home"
-                      mkdir -p "$HOME"
-                      npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
-                      export PATH="$PWD/.postman-cli/bin:$PATH"
-                      postman login --with-api-key "$POSTMAN_API_KEY"
                       node tools/pact-harness/scripts/postman/pull-artifacts.mjs \
                         --collection-uid "<+pipeline.variables.CONSUMER_COLLECTION_UID>" \
-                        --spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" --out-dir .local
+                        --collection-workspace-id "<+pipeline.variables.CONSUMER_WORKSPACE_ID>" \
+                        --expected-collection-canonical-sha256 "<+pipeline.variables.CONSUMER_COLLECTION_CANONICAL_SHA256>" \
+                        --spec-id "<+pipeline.variables.PROVIDER_SPEC_ID>" \
+                        --spec-workspace-id "<+pipeline.variables.PROVIDER_WORKSPACE_ID>" \
+                        --expected-spec-canonical-sha256 "<+pipeline.variables.PROVIDER_SPEC_CANONICAL_SHA256>" \
+                        --out-dir .local
+                      unset POSTMAN_API_KEY
                       node tools/pact-harness/pact-harness.mjs postman-to-pact \
                         --collection .local/collection.json \
                         --provider "<+pipeline.variables.PROVIDER_NAME>" \

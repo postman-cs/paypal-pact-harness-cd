@@ -67,6 +67,11 @@ test('drop-in Kubernetes stages declare limits and keep Postman CLI installation
   assert.match(consumer, /postman-cli@1\.45\.0/);
   assert.match(consumer, /--prefix "\$PWD\/\.postman-cli"/);
   assert.match(consumer, /export HOME="\$PWD\/\.ci-home"/);
+  assert.match(consumer, /node \.pact-harness-source\/paypal-contract-gate\.mjs verify/);
+  assert.match(consumer, /POSTMAN_COLLECTION: <\+stage\.variables\.postman_collection>/);
+  assert.doesNotMatch(consumer, /cd \.pact-harness-source/);
+  assert.doesNotMatch(consumer, /fixtures\/paypal\/orders-lower/);
+  assert.doesNotMatch(consumer, /\.pact-harness-source\/\.contract-reports/);
 });
 
 test('customer-owned stage verifies an externally locked bundle and never attests the customer repo as Postman-CS', () => {
@@ -97,7 +102,10 @@ test('complete Harness pipelines pin the repo name and attest origin, commit, an
       if (!entry.stage.spec.cloneCodebase) continue;
       const first = entry.stage.spec.execution.steps[0].step;
       assert.equal(first.identifier, 'source_attestation', `${name}: source attestation must run first`);
-      assert.equal(first.spec.envVariables.EXPECTED_SOURCE_COMMIT, '<+codebase.commitSha>');
+      const expectedCommit = name === 'contract-gate.broker.pipeline.yaml'
+        ? '<+pipeline.variables.REVIEWED_SOURCE_COMMIT>'
+        : '<+codebase.commitSha>';
+      assert.equal(first.spec.envVariables.EXPECTED_SOURCE_COMMIT, expectedCommit);
       assert.match(first.spec.command, /attest-harness-source\.mjs/);
     }
   }
@@ -120,7 +128,7 @@ test('runtime drop-in stages pull and attest only postman-cs/paypal-pact-harness
     const stage = YAML.parse(source).stage;
     const variables = Object.fromEntries(stage.variables.map((variable) => [variable.name, variable]));
     assert.equal(variables.harness_source_connector.value, '<+input>', `${name}: connector must remain a runtime input`);
-    assert.equal(variables.harness_source_ref.value, '<+input>.default(main)', `${name}: source ref must default to main`);
+    assert.equal(variables.harness_source_ref.value, '<+input>', `${name}: immutable source tag must be supplied`);
     assert.equal(variables.harness_source_commit.value, '<+input>', `${name}: full source commit must be supplied`);
 
     const [cloneEntry, attestEntry, ...workEntries] = stage.spec.execution.steps;
@@ -129,8 +137,8 @@ test('runtime drop-in stages pull and attest only postman-cs/paypal-pact-harness
     assert.equal(clone.identifier, 'pull_postman_cs_pact_harness');
     assert.equal(clone.spec.connectorRef, '<+stage.variables.harness_source_connector>');
     assert.equal(clone.spec.repoName, 'postman-cs/paypal-pact-harness-cd');
-    assert.equal(clone.spec.build.type, 'branch');
-    assert.equal(clone.spec.build.spec.branch, '<+stage.variables.harness_source_ref>');
+    assert.equal(clone.spec.build.type, 'tag');
+    assert.equal(clone.spec.build.spec.tag, '<+stage.variables.harness_source_ref>');
     assert.equal(clone.spec.cloneDirectory, '.pact-harness-source');
     assert.equal(clone.spec.depth, 1);
 
@@ -151,4 +159,35 @@ test('runtime drop-in stages pull and attest only postman-cs/paypal-pact-harness
         '<+input>.default(.pact-harness-source/config/contract-policy.json)');
     }
   }
+});
+
+test('every Postman Cloud Harness invocation pins workspace membership and canonical content', () => {
+  const files = [
+    join(HARNESS, 'stages', 'consumer-contract-gate.yaml'),
+    join(HARNESS, 'stages', 'consumer-contract-gate.vendored.yaml'),
+    join(HARNESS, 'contract-gate.lower.pipeline.yaml'),
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    assert.match(source, /--cloud[\s\\]*\n[\s\S]{0,250}--workspace-id/, `${file}: Cloud run needs workspace pin`);
+    assert.match(source, /--workspace-id[\s\S]{0,250}--expected-sha256/, `${file}: Cloud run needs digest pin`);
+  }
+});
+
+test('real-consumer Harness pull pins both consumer Collection and provider OAS content', () => {
+  const source = readFileSync(join(HARNESS, 'contract-gate.real-consumer.pipeline.yaml'), 'utf8');
+  const pipeline = YAML.parse(source).pipeline;
+  const variables = Object.fromEntries(pipeline.variables.map((variable) => [variable.name, variable]));
+  assert.equal(variables.CONSUMER_COLLECTION_CANONICAL_SHA256.value, '<+input>');
+  assert.equal(variables.PROVIDER_SPEC_CANONICAL_SHA256.value, '<+input>');
+  assert.match(source, /--expected-collection-canonical-sha256\s+"<\+pipeline\.variables\.CONSUMER_COLLECTION_CANONICAL_SHA256>"/);
+  assert.match(source, /--expected-spec-canonical-sha256\s+"<\+pipeline\.variables\.PROVIDER_SPEC_CANONICAL_SHA256>"/);
+});
+
+test('GitHub Cloud collection execution uses the reviewed workspace and canonical digest', () => {
+  const source = readFileSync(join(ROOT, '.github', 'workflows', 'contract-gate.yml'), 'utf8');
+  assert.match(source, /provider\.workspace\.id/);
+  assert.match(source, /provider\.collection\.canonicalSha256/);
+  assert.match(source, /--cloud[\s\S]{0,250}--workspace-id[\s\S]{0,250}--expected-sha256/);
 });
