@@ -59,12 +59,12 @@ function dedicatedCheckout(input) {
   if (canonicalPath(realTarget) === current) {
     throw new Error('--dir must identify a dedicated ledger checkout, not the current directory');
   }
-  const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+  const prefix = execFileSync('git', ['rev-parse', '--show-prefix'], {
     cwd: realTarget,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
-  if (canonicalPath(top) !== canonicalPath(realTarget)) {
+  if (prefix) {
     throw new Error('--dir must be the root of its own dedicated Git worktree');
   }
   return realTarget;
