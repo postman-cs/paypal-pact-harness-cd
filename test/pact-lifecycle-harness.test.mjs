@@ -130,8 +130,10 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
   assert.match(source, /PROVIDER_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
   assert.match(source, /CONSUMER_PACT_BRANCH: <\+pipeline\.variables\.CONSUMER_PACT_BRANCH>/);
   assert.match(source, /PROVIDER_PACT_BRANCH: <\+pipeline\.variables\.PROVIDER_PACT_BRANCH>/);
-  assert.match(source, /broker publish[\s\S]{0,500}--retries 0[\s\S]{0,100}--log-level error/,
-    'the diagnostic Broker proof must surface the first publication error without exponential backoff');
+  assert.match(source, /broker publish[\s\S]{0,500}--retries 3[\s\S]{0,100}--log-level error/,
+    'the Broker proof must surface publication errors with bounded transient retries');
+  assert.equal((source.match(/--retries 3/g) ?? []).length, 3,
+    'publish, provider verification, and can-i-deploy must use the same bounded HTTP retry policy');
   assert.equal((source.match(/SSL_CERT_FILE: \/etc\/ssl\/certs\/ca-certificates\.crt/g) ?? []).length, 3,
     'every Pact CLI Broker step must explicitly use the Debian CA bundle');
   assert.equal((source.match(/test -r "\$SSL_CERT_FILE"/g) ?? []).length, 3,

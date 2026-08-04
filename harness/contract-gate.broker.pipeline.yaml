@@ -215,7 +215,7 @@ pipeline:
                           --branch "$CONSUMER_PACT_BRANCH" \
                           --validate \
                           --strict \
-                          --retries 0 \
+                          --retries 3 \
                           --log-level error \
                           --output json \
                           > .contract-reports/pact-consumer/publish.json 2>&1; then
@@ -268,6 +268,7 @@ pipeline:
                         --provider-version "$PROVIDER_VERSION" \
                         --provider-branch "$PROVIDER_PACT_BRANCH" \
                         --publish \
+                        --retries 3 \
                         --junit "$REPORTS/provider-verification.xml" \
                         --json "$REPORTS/provider-verification.json" \
                         --no-colour
@@ -308,6 +309,7 @@ pipeline:
                         --pacticipant paypal-orders \
                         --version "$PROVIDER_VERSION" \
                         --to-environment "<+pipeline.variables.TARGET_ENVIRONMENT>" \
+                        --retries 3 \
                         --retry-while-unknown 6 \
                         --retry-interval 10 \
                         --output json \
