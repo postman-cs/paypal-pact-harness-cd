@@ -1,0 +1,208 @@
+# PROVIDER PIPELINE STAGE
+# The provider is already running inside this CI execution (Background step,
+# service container, or lower namespace). Provider states must be deterministic.
+stage:
+  name: Pact - Verify provider
+  identifier: pact_verify_provider
+  type: CI
+  variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
+    - name: broker_base_url
+      type: String
+      required: true
+      value: <+input>
+    - name: broker_username
+      type: String
+      required: true
+      value: <+input>.default(pact)
+    - name: provider_name
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_version
+      type: String
+      required: true
+      value: <+input>.default(<+codebase.commitSha>)
+    - name: provider_branch
+      type: String
+      required: true
+      value: <+input>.default(<+codebase.branch>)
+    - name: provider_hostname
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_port
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_transport
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_base_path
+      type: String
+      value: <+input>.default("")
+    - name: state_change_url
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_readiness_url
+      type: String
+      required: true
+      value: <+input>
+    - name: provider_readiness_attempts
+      type: String
+      required: true
+      value: <+input>.default(60)
+    - name: provider_readiness_interval_ms
+      type: String
+      required: true
+      value: <+input>.default(2000)
+    - name: consumer_version_selectors
+      type: String
+      required: true
+      value: <+input>.default('[{"mainBranch":true},{"deployedOrReleased":true},{"matchingBranch":true}]')
+    - name: include_wip_pacts_since
+      type: String
+      required: true
+      value: <+input>
+  spec:
+    cloneCodebase: true
+    platform:
+      os: Linux
+      arch: Amd64
+    execution:
+      steps:
+        - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: tag
+                spec:
+                  tag: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
+            type: Run
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
+            spec:
+              connectorRef: <+input>
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
+              command: |
+                set -eu
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+        - step:
+            type: Run
+            name: Verify broker-selected pacts and publish results
+            identifier: verify_selected_pacts
+            spec:
+              connectorRef: <+input>
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+              shell: Sh
+              envVariables:
+                PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
+                PACT_BROKER_USERNAME: <+stage.variables.broker_username>
+                PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
+                PACT_DO_NOT_TRACK: "true"
+                SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+                PROVIDER_NAME: <+stage.variables.provider_name>
+                PROVIDER_VERSION: <+stage.variables.provider_version>
+                PROVIDER_BRANCH: <+stage.variables.provider_branch>
+                PROVIDER_HOSTNAME: <+stage.variables.provider_hostname>
+                PROVIDER_PORT: <+stage.variables.provider_port>
+                PROVIDER_TRANSPORT: <+stage.variables.provider_transport>
+                PROVIDER_BASE_PATH: <+stage.variables.provider_base_path>
+                STATE_CHANGE_URL: <+stage.variables.state_change_url>
+                PROVIDER_READINESS_URL: <+stage.variables.provider_readiness_url>
+                PROVIDER_READINESS_ATTEMPTS: <+stage.variables.provider_readiness_attempts>
+                PROVIDER_READINESS_INTERVAL_MS: <+stage.variables.provider_readiness_interval_ms>
+                CONSUMER_VERSION_SELECTORS: <+stage.variables.consumer_version_selectors>
+                INCLUDE_WIP_PACTS_SINCE: <+stage.variables.include_wip_pacts_since>
+                PROVIDER_BEARER_TOKEN: <+secrets.getValue("paypal_pact_provider_bearer_token")>
+              command: |
+                set -eu
+                REPORTS=.contract-reports/pact-provider
+                mkdir -p "$REPORTS"
+                rm -f "$REPORTS/provider-verification.xml" \
+                  "$REPORTS/provider-verification.json"
+                test -r "$SSL_CERT_FILE"
+                node .pact-harness-source/scripts/ci/pact-broker-preflight.mjs
+                node .pact-harness-source/scripts/ci/wait-for-provider.mjs
+                node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
+                  --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
+                  --output .pact/bin/pact
+
+                set -- \
+                  --broker-url "$PACT_BROKER_BASE_URL" \
+                  --provider-name "$PROVIDER_NAME" \
+                  --hostname "$PROVIDER_HOSTNAME" \
+                  --port "$PROVIDER_PORT" \
+                  --transport "$PROVIDER_TRANSPORT" \
+                  --provider-version "$PROVIDER_VERSION" \
+                  --provider-branch "$PROVIDER_BRANCH" \
+                  --consumer-version-selectors "$CONSUMER_VERSION_SELECTORS" \
+                  --enable-pending \
+                  --include-wip-pacts-since "$INCLUDE_WIP_PACTS_SINCE" \
+                  --header "Authorization=Bearer $PROVIDER_BEARER_TOKEN" \
+                  --publish \
+                  --retries 3 \
+                  --junit "$REPORTS/provider-verification.xml" \
+                  --json "$REPORTS/provider-verification.json" \
+                  --no-colour
+                [ -z "$PROVIDER_BASE_PATH" ] || set -- "$@" --base-path "$PROVIDER_BASE_PATH"
+                [ -z "$STATE_CHANGE_URL" ] || set -- "$@" --state-change-url "$STATE_CHANGE_URL"
+
+                .pact/bin/pact verifier "$@"
+                node .pact-harness-source/scripts/ci/assert-pact-evidence.mjs \
+                  provider-verification \
+                  --junit "$REPORTS/provider-verification.xml"
+              reports:
+                type: JUnit
+                spec:
+                  paths:
+                    - .contract-reports/pact-provider/provider-verification.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
+    infrastructure:
+      type: KubernetesDirect
+      spec:
+        connectorRef: <+input>
+        namespace: <+input>.default(paypal-contract-lower)
+        automountServiceAccountToken: false
+        nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        os: Linux

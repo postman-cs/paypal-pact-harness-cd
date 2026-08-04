@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "consumer": {
+    "requireSuccessInteractions": true,
+    "requireNegativeInteractions": true,
+    "validateConsumerExamples": true
+  },
+  "oasAudit": {
+    "requireOperationId": true,
+    "requireSecurity": true,
+    "requireSuccessResponse": true,
+    "requireNegativeResponse": true,
+    "requireExamples": true,
+    "exampleValidationMode": "partial"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "harness": {
+    "orgIdentifier": "default",
+    "projectIdentifier": "default_project",
+    "inputSetName": "PayPal Pact Broker lower",
+    "inputSetIdentifier": "paypal_pact_broker_lower"
+  },
+  "release": {
+    "sourceRef": "v0.6.0",
+    "reviewedSourceCommit": "5c78b1e9aaa6da92db3c0683b71849a639155f21",
+    "consumerPactBranch": "main",
+    "providerPactBranch": "main"
+  },
+  "infrastructure": {
+    "codebaseConnector": "REPLACE_WITH_GITHUB_CONNECTOR",
+    "containerRegistryConnector": "REPLACE_WITH_REGISTRY_CONNECTOR",
+    "kubernetesConnector": "REPLACE_WITH_KUBERNETES_CONNECTOR",
+    "kubernetesNamespace": "REPLACE_WITH_LOWER_NAMESPACE"
+  },
+  "broker": {
+    "baseUrl": "REPLACE_WITH_HTTPS_PACT_BROKER_URL",
+    "includeWipPactsSince": "2026-07-04",
+    "targetEnvironment": "lower"
+  },
+  "postman": {
+    "bindingFile": "config/postman-workspace-simulation.json"
+  }
+}

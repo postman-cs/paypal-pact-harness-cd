@@ -1,0 +1,42 @@
+[
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders"
+  },
+  {
+    "method": "GET",
+    "path": "/v2/checkout/orders/{id}"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v2/checkout/orders/{id}"
+  },
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders/{id}/confirm-payment-source"
+  },
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders/{id}/authorize"
+  },
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders/{id}/capture"
+  },
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders/{id}/track"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v2/checkout/orders/{id}/trackers/{tracker_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/v2/checkout/orders/order-update-callback"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v2/checkout/orders/{id}/internal"
+  }
+]

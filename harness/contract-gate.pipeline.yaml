@@ -11,6 +11,7 @@ pipeline:
     ci:
       codebase:
         connectorRef: <+input>   # a git connector to THIS repo (paypal-pact-harness-cd)
+        repoName: paypal-pact-harness-cd
         build: <+input>
   stages:
     - stage:
@@ -24,11 +25,23 @@ pipeline:
           execution:
             steps:
               - step:
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  type: Run
+                  spec:
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+              - step:
                   name: Immediate BDC gate (consumer pact × provider OAS)
                   identifier: bdc_gate
                   type: Run
                   spec:
-                    image: node:20
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
                     shell: Sh
                     command: |
                       mkdir -p .out
@@ -45,7 +58,7 @@ pipeline:
                   identifier: fleet_can_i_deploy
                   type: Run
                   spec:
-                    image: node:20
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
                     shell: Sh
                     command: |
                       node tools/pact-harness/pact-harness.mjs can-i-deploy \
@@ -55,7 +68,7 @@ pipeline:
                   identifier: fail_closed_proof
                   type: Run
                   spec:
-                    image: node:20
+                    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
                     shell: Sh
                     command: |
                       node tools/pact-harness/pact-harness.mjs record-verification \

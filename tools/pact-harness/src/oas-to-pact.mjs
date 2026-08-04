@@ -16,6 +16,10 @@ const METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', 'optio
  *  becomes the consumer's expected response body (type-checked downstream). */
 function synth(oas, schema, depth = 0) {
   if (depth > 40) return 'x';
+  const resolved = deref(oas, schema) ?? {};
+  if (resolved.example !== undefined) return resolved.example;
+  if (resolved.default !== undefined) return resolved.default;
+  if (Array.isArray(resolved.enum) && resolved.enum.length > 0) return resolved.enum[0];
   const f = flattenAllOf(oas, schema);
   switch (f.type) {
     case 'object': {
@@ -26,20 +30,32 @@ function synth(oas, schema, depth = 0) {
     case 'array': return f.items ? [synth(oas, f.items, depth + 1)] : [];
     case 'integer': case 'number': return 1;
     case 'boolean': return true;
-    default: return 'x'; // string / enum / any
+    default:
+      if (resolved.format === 'date-time') return '2026-01-01T00:00:00Z';
+      if (resolved.format === 'date') return '2026-01-01';
+      if (resolved.format === 'uuid') return '00000000-0000-4000-8000-000000000000';
+      if (resolved.format === 'email') return 'consumer@example.test';
+      if (resolved.pattern && /\\d|\[0-9\]/.test(resolved.pattern)) return '1.00';
+      return 'SAMPLE'; // string / any
   }
 }
 
-/** The first success (2xx/default) JSON response of an operation. */
-function successResponse(oas, op) {
+/** Every explicit JSON response the consumer declares it handles. */
+function contractResponses(oas, op) {
   const responses = op.responses ?? {};
-  const key = Object.keys(responses).find((k) => /^2\d\d$/.test(k))
-    ?? (responses['2XX'] ? '2XX' : (responses.default ? 'default' : null));
-  if (!key) return null;
-  const resp = deref(oas, responses[key]) ?? {};
-  const content = resp.content ?? {};
-  const media = content['application/json'] ?? content[Object.keys(content).find((c) => c.includes('json')) ?? ''];
-  return { status: /^\d+$/.test(key) ? Number(key) : 200, schema: media?.schema };
+  return Object.entries(responses).flatMap(([key, value]) => {
+    const normalized = key.toUpperCase();
+    if (!/^[1-5]\d\d$/.test(normalized) && !/^[1-5]XX$/.test(normalized) && normalized !== 'DEFAULT') {
+      return [];
+    }
+    const resp = deref(oas, value) ?? {};
+    const content = resp.content ?? {};
+    const media = content['application/json'] ?? content[Object.keys(content).find((type) => type.includes('json')) ?? ''];
+    const status = /^\d+$/.test(normalized)
+      ? Number(normalized)
+      : (normalized === 'DEFAULT' ? 200 : Number(`${normalized[0]}00`));
+    return [{ key, status, schema: media?.schema }];
+  });
 }
 
 const concretePath = (p) => p.replace(/\{[^}]+\}/g, 'sample');
@@ -57,13 +73,18 @@ export function oasToPact(consumerOas, opts) {
     for (const method of Object.keys(item ?? {})) {
       if (!METHODS.has(method)) continue;
       const op = item[method];
-      const sr = successResponse(consumerOas, op);
-      if (!sr) continue;
-      interactions.push(buildInteraction({
-        description: op.operationId || `${method.toUpperCase()} ${pathKey}`,
-        request: { method: method.toUpperCase(), path: concretePath(pathKey) },
-        response: { status: sr.status, body: sr.schema ? synth(consumerOas, sr.schema) : undefined },
-      }));
+      const responses = contractResponses(consumerOas, op);
+      for (const response of responses) {
+        const operation = op.operationId || `${method.toUpperCase()} ${pathKey}`;
+        interactions.push(buildInteraction({
+          description: `${operation} (${response.key})`,
+          request: { method: method.toUpperCase(), path: concretePath(pathKey) },
+          response: {
+            status: response.status,
+            body: response.schema ? synth(consumerOas, response.schema) : undefined,
+          },
+        }));
+      }
     }
   }
   return buildPact(consumer, opts.provider, interactions);

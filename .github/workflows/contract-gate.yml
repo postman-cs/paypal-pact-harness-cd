@@ -1,0 +1,303 @@
+name: Contract gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      postman_cloud:
+        description: Pull the live dual-workspace assets and run the provider Cloud Collection
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: contract-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine-and-action:
+    name: Engine and composite action
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Attest source and committed portable CLI
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/ci/attest-harness-source.mjs
+      - name: Install development dependencies
+        run: npm ci
+      - name: Run engine and topology tests
+        run: npm test
+      - name: Check deterministic fixtures and topology
+        run: npm run check
+      - name: Rebuild and verify the install-free pipeline bundle
+        run: |
+          npm run build:bundle
+          git diff --exit-code -- tools/pact-harness
+      - name: Prove the PayPal TPE two-command path
+        run: |
+          node paypal-contract-gate.mjs doctor
+          node paypal-contract-gate.mjs verify --clean
+      - name: Package the platform-agnostic CLI release
+        run: npm run package:bundle
+      - name: Test the packed bundle outside the repository
+        run: npm run test:packed
+      - name: Run consumer and application contract action
+        id: contract
+        uses: ./
+        with:
+          provider-oas: fixtures/paypal/checkout_orders_v2.json
+          consumer-contract: fixtures/paypal/orders-checkout-consumer.postman_collection.json
+          consumer-format: postman
+          provider-name: paypal-orders
+          application-routes: fixtures/paypal/orders-spring-routes.json
+          spec-subset: config/subsets/orders-demo.json
+          contract-policy: config/contract-policy.json
+          route-exceptions: config/route-exceptions.json
+          environment: lower
+          complete-results: "true"
+          route-policy: block
+      - name: Prove consumer drift and rogue endpoints fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node tools/pact-harness/pact-harness.mjs can-i-deploy \
+            --oas fixtures/paypal/checkout_orders_v2.drift.json \
+            --pact "${{ steps.contract.outputs.consumer-pact }}" \
+            --policy config/contract-policy.json; then
+            echo "::error::consumer-breaking provider drift was not blocked"
+            exit 1
+          fi
+          if node tools/pact-harness/pact-harness.mjs oas-diff \
+            --baseline fixtures/paypal/checkout_orders_v2.json \
+            --candidate fixtures/paypal/checkout_orders_v2.drift.json \
+            --subset config/subsets/orders-demo.json; then
+            echo "::error::selected-surface breaking OAS drift was not blocked"
+            exit 1
+          fi
+          if node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
+            --spec fixtures/paypal/checkout_orders_v2.json \
+            --routes fixtures/paypal/orders-spring-routes.rogue.json \
+            --subset config/subsets/orders-demo.json \
+            --exceptions config/route-exceptions.json \
+            --policy block; then
+            echo "::error::rogue application endpoint was not blocked"
+            exit 1
+          fi
+      - name: Upload contract evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: contract-engine-evidence
+          path: |
+            .contract-reports/
+            dist/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+
+  tpe-quick-start-portability:
+    name: TPE quick start (${{ matrix.os }}, Node 20)
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2022
+          - macos-14
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up minimum supported Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install development dependencies
+        run: npm ci
+      - name: Test source, simple entry, and extracted release bundle
+        run: npm run test:all
+      - name: Verify the rebuilt bundle is committed
+        run: git diff --exit-code -- tools/pact-harness
+
+  postman-workspace-simulation:
+    name: Live Postman consumer/provider workspace proof
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.postman_cloud }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install development dependencies
+        run: npm ci
+      - name: Pull both workspace contracts and run both compatibility paths
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_SIMULATION_PMAK }}
+        run: |
+          set -euo pipefail
+          test -n "$POSTMAN_API_KEY"
+          npm run postman:verify
+      - name: Upload live Postman workspace evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: live-postman-workspace-evidence
+          path: .contract-reports/postman-workspace-simulation/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+
+  spring-lower-environment:
+    name: Spring Boot lower-environment proof
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: demo/orders-spring/pom.xml
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install harness dependencies
+        run: npm ci
+      - name: Test and package the Orders Spring Boot wrapper
+        run: mvn -B -f demo/orders-spring/pom.xml verify
+      - name: Start the lower-environment wrapper and export both route inventories
+        shell: bash
+        env:
+          CONTRACT_DEMO_TOKEN: github-lower-contract-token
+        run: |
+          set -euo pipefail
+          mkdir -p .contract-reports
+          java -jar demo/orders-spring/target/orders-spring-wrapper-0.1.0.jar \
+            > .contract-reports/orders-spring.log 2>&1 &
+          echo "$!" > .contract-reports/orders-spring.pid
+          for attempt in $(seq 1 60); do
+            curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null && break
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null
+          node scripts/collect-route-inventories.mjs \
+            --actuator-url http://127.0.0.1:8080/actuator/mappings \
+            --openapi-url http://127.0.0.1:8080/v3/api-docs \
+            --out-dir .contract-reports/inventory
+      - name: Gate authoritative Actuator mappings
+        uses: ./
+        with:
+          provider-oas: fixtures/paypal/checkout_orders_v2.json
+          consumer-contract: fixtures/paypal/orders-consumer.pact.json
+          consumer-format: pact
+          application-routes: .contract-reports/inventory/actuator-mappings.json
+          spec-subset: config/subsets/orders-demo.json
+          contract-policy: config/contract-policy.json
+          route-exceptions: config/route-exceptions.json
+          environment: lower
+          complete-results: "true"
+          route-policy: block
+          report-directory: .contract-reports/spring
+      - name: Cross-check generated OpenAPI inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/pact-harness/vendor/postman-cs/compare-routes.mjs \
+            --spec fixtures/paypal/checkout_orders_v2.json \
+            --routes .contract-reports/inventory/generated-openapi.json \
+            --subset config/subsets/orders-demo.json \
+            --exceptions config/route-exceptions.json \
+            --policy block \
+            --json-out .contract-reports/generated-openapi-route-contract.json \
+            --junit-out .contract-reports/generated-openapi-route-contract.xml
+      - name: Install the exact Postman CLI release
+        run: npm install --global postman-cli@1.45.0
+      - name: Exercise positive and negative cases with Postman CLI
+        shell: bash
+        env:
+          CONTRACT_DEMO_TOKEN: github-lower-contract-token
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_SIMULATION_PMAK }}
+          POSTMAN_CLOUD_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.postman_cloud }}
+        run: |
+          set -euo pipefail
+          COLLECTION=fixtures/paypal/orders-lower.postman_collection.json
+          CLOUD_ARGS=()
+          if [ "$POSTMAN_CLOUD_ENABLED" = "true" ]; then
+            test -n "$POSTMAN_API_KEY"
+            COLLECTION="$(node -p "require('./config/postman-workspace-simulation.json').provider.collection.uid")"
+            WORKSPACE_ID="$(node -p "require('./config/postman-workspace-simulation.json').provider.workspace.id")"
+            COLLECTION_SHA256="$(node -p "require('./config/postman-workspace-simulation.json').provider.collection.canonicalSha256")"
+            CLOUD_ARGS+=(
+              --cloud
+              --workspace-id "$WORKSPACE_ID"
+              --expected-sha256 "$COLLECTION_SHA256"
+            )
+          fi
+          node scripts/postman/run-lower-collection.mjs \
+            --collection "$COLLECTION" \
+            --base-url http://127.0.0.1:8080 \
+            --out-dir .contract-reports/postman \
+            "${CLOUD_ARGS[@]}"
+      - name: Stop the lower-environment wrapper
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          test ! -f .contract-reports/orders-spring.pid ||
+            kill "$(cat .contract-reports/orders-spring.pid)" 2>/dev/null || true
+      - name: Upload lower-environment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: spring-lower-environment-evidence
+          path: .contract-reports/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+
+  publish-lower-environment-image:
+    name: Publish lower-environment wrapper image
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - engine-and-action
+      - tpe-quick-start-portability
+      - spring-lower-environment
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up container-backed Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable wrapper image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: demo/orders-spring
+          push: true
+          tags: ghcr.io/${{ github.repository }}/orders-spring-wrapper:sha-${{ github.sha }}
+          provenance: true
+          sbom: true

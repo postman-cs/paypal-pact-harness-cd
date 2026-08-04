@@ -1,9 +1,11 @@
 {
   "name": "pact-harness-bundle",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "bin": {
-    "pact-harness": "./pact-harness.mjs"
+    "pact-harness": "./pact-harness.mjs",
+    "paypal-contract-gate": "./paypal-contract-gate.mjs",
+    "paypal-contract-gate-advanced": "./contract-gate.mjs"
   }
 }

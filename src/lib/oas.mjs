@@ -46,9 +46,43 @@ export function operationFor(oas, method, concretePath) {
   for (const pathKey of Object.keys(paths)) {
     if (!pathMatches(pathKey, concretePath)) continue;
     const item = paths[pathKey] ?? {};
-    if (item[m]) return { pathKey, method: m, operation: item[m] };
+    if (item[m]) return { pathKey, method: m, pathItem: item, operation: item[m] };
   }
   return null;
+}
+
+/** Merge path-level and operation-level parameters, with operation entries winning. */
+export function parametersFor(oas, pathItem, operation) {
+  const merged = new Map();
+  for (const source of [pathItem?.parameters ?? [], operation?.parameters ?? []]) {
+    for (const raw of source) {
+      const parameter = deref(oas, raw);
+      if (!parameter?.name || !parameter?.in) continue;
+      merged.set(`${parameter.in}:${parameter.name}`, parameter);
+    }
+  }
+  return [...merged.values()];
+}
+
+/** Select a JSON-compatible media entry from an OpenAPI content map. */
+export function jsonMedia(content = {}) {
+  return content['application/json']
+    ?? content[Object.keys(content).find((type) => type.includes('json')) ?? '']
+    ?? null;
+}
+
+/** Return the request body schema for an operation, if it declares JSON input. */
+export function requestSchemaFor(oas, operation) {
+  const requestBody = deref(oas, operation?.requestBody);
+  return jsonMedia(requestBody?.content)?.schema ?? null;
+}
+
+/** Resolve the response object selected for a concrete status. */
+export function responseFor(oas, operation, status) {
+  const responses = operation?.responses ?? {};
+  const key = String(status);
+  const response = responses[key] ?? responses[`${key[0]}XX`] ?? responses.default;
+  return response ? deref(oas, response) : null;
 }
 
 /**
@@ -56,11 +90,9 @@ export function operationFor(oas, method, concretePath) {
  * Falls back to `default`. Returns the raw (still possibly $ref'd) schema or null.
  */
 export function responseSchemaFor(oas, operation, status, contentType = 'application/json') {
-  const responses = operation?.responses ?? {};
-  const key = String(status);
-  const resp = responses[key] ?? responses[`${key[0]}XX`] ?? responses.default;
+  const resp = responseFor(oas, operation, status);
   if (!resp) return null;
-  const content = deref(oas, resp).content ?? {};
+  const content = resp.content ?? {};
   const media = content[contentType]
     ?? content[Object.keys(content).find((c) => c.includes('json')) ?? ''];
   return media?.schema ?? null;

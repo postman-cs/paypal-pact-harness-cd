@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "version": "0.10.7",
+  "release": "v0.10.7",
+  "repository": "pact-foundation/pact-cli",
+  "assets": {
+    "linux-x64-gnu": {
+      "url": "https://github.com/pact-foundation/pact-cli/releases/download/v0.10.7/pact-x86_64-linux-gnu",
+      "sha256": "2556840f1e613079b0126e9118a904f48cc1df6914986c45730572ff7ea17a9c",
+      "bytes": 26555224
+    }
+  }
+}

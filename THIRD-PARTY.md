@@ -7,19 +7,30 @@ adopted component's licence here **before** it is pinned/deployed.
 
 | Package | Version | Licence | Use |
 | --- | --- | --- | --- |
-| `yaml` | ^2.5.1 | MIT (verify at pin) | parse OAS / collection YAML (Decision D4) |
+| `yaml` | 2.9.0 (resolved from ^2.5.1) | ISC | parse OAS / collection YAML (Decision D4) |
 
 Everything else in `src/` is Node stdlib. No network, no telemetry, no EchoAtlas packages.
 
-## Infrastructure components — none
+## Production CDC command-line component
+
+| Component | Version | Licence | Use |
+| --- | --- | --- | --- |
+| `pact-foundation/pact-cli` | 0.10.7 | MIT | Publish executable consumer pacts, run the official provider verifier, query `can-i-deploy`, and record successful deployments. |
+
+The Linux/Amd64 release binary URL, byte count, and SHA-256 are committed in
+`pact-cli.lock.json`. `scripts/install-pact-cli.mjs` downloads only that release
+from approved GitHub hosts and verifies it before setting the executable bit.
+
+## Phase-0 infrastructure components — none
 
 The dynamic-replay leg (`pact_verifier_cli`, the mock plane) was dropped 2026-07-29,
 and the **OSS Pact Broker + Postgres were dropped too** — the cross-team `can-i-deploy`
 system of record is now a **git-backed contract ledger** (Decision D12), which needs no
 runtime component: the store is a git repo, the verdict is a pure computation in CI.
 
-So there is **nothing to adopt, pin, or licence beyond `yaml` above** — no broker image,
-no database, no server. The only runtime dependency remains `yaml` (MIT).
+The phase-0 static proof still adopts no broker image, database, or server. The
+production CDC stages require an externally managed OSS Pact Broker endpoint; its
+deployment image/database are intentionally not selected or deployed by this repo.
 
 ## D3 diligence — RESOLVED (2026-07-29)
 

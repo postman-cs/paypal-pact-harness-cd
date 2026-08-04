@@ -1,0 +1,205 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+function stage(name) {
+  const path = join(ROOT, 'harness', 'stages', name);
+  const source = readFileSync(path, 'utf8');
+  const document = YAML.parse(source);
+  assert.ok(document?.stage?.identifier, `${name} must be an importable Harness stage`);
+  return { source, document };
+}
+
+test('Postman preflight retrieves both workspace-bound OAS documents with the service account secret', () => {
+  const { source } = stage('postman-oas-preflight.yaml');
+  for (const flag of [
+    '--consumer-workspace-id', '--consumer-spec-id',
+    '--provider-workspace-id', '--provider-spec-id',
+  ]) assert.match(source, new RegExp(flag));
+  assert.match(source, /paypal_postman_service_account_pmak/);
+  assert.match(source, /oas-to-pact/);
+  assert.match(source, /bdc-verify/);
+  assert.match(source, /\.contract-reports\/postman-oas/);
+  assert.match(source, /postman-oas-provenance\.json/);
+});
+
+test('consumer publication validates strict executable pacts with immutable version and branch metadata', () => {
+  const { source, document } = stage('pact-consumer-publish.yaml');
+  const steps = document.stage.spec.execution.steps.map((entry) => entry.step.identifier);
+  const variables = Object.fromEntries(document.stage.variables.map((variable) => [variable.name, variable]));
+  assert.ok(steps.indexOf('generate_executable_consumer_pacts') < steps.indexOf('publish_validated_pacts'));
+  assert.match(source, /CONSUMER_CONTRACT_COMMAND/);
+  assert.match(source, /consumer-pact-run\.mjs/);
+  assert.match(source, /prepare "\$PACTS_PATH"/);
+  assert.match(source, /export PACT_OUTPUT_DIR="\$PACTS_PATH"/);
+  assert.match(source, /validate "\$PACTS_PATH"/);
+  assert.equal(variables.pacts_path.value, '<+input>');
+  assert.equal(variables.consumer_branch.value, '<+input>');
+  assert.doesNotMatch(source, /fixtures\/paypal\/orders-consumer\.pact\.json/);
+  assert.match(source, /pact broker publish/);
+  assert.match(source, /--consumer-app-version/);
+  assert.match(source, /--branch/);
+  assert.match(source, /--validate/);
+  assert.match(source, /--strict/);
+});
+
+test('provider verification uses broker selectors, pending and WIP pacts, states, and publishes evidence', () => {
+  const { source, document } = stage('pact-provider-verify.yaml');
+  for (const flag of [
+    '--consumer-version-selectors', '--enable-pending', '--include-wip-pacts-since',
+    '--state-change-url', '--publish', '--provider-version', '--provider-branch',
+    '--junit', '--json',
+  ]) assert.match(source, new RegExp(flag));
+  assert.doesNotMatch(source, /--ignore-no-pacts-error/);
+  assert.match(source, /wait-for-provider\.mjs/);
+  assert.match(source, /assert-pact-evidence\.mjs/);
+  assert.match(source, /provider-verification/);
+  const variables = Object.fromEntries(document.stage.variables.map((variable) => [variable.name, variable]));
+  assert.equal(variables.provider_readiness_url.value, '<+input>');
+  assert.equal(variables.provider_hostname.value, '<+input>');
+  assert.equal(variables.provider_port.value, '<+input>');
+  assert.equal(variables.provider_transport.value, '<+input>');
+  assert.equal(variables.state_change_url.value, '<+input>');
+  assert.doesNotMatch(source, /default\(127\.0\.0\.1\)|default\(http:\/\/127\.0\.0\.1/);
+});
+
+test('deployment decision and deployment recording remain separate ordered responsibilities', () => {
+  const gate = stage('pact-can-i-deploy.yaml').source;
+  const record = stage('pact-record-deployment.yaml').source;
+  assert.match(gate, /immediately before PayPal's existing deployment/);
+  assert.match(gate, /pact broker can-i-deploy/);
+  assert.match(gate, /assert-pact-evidence\.mjs/);
+  assert.match(gate, /can-i-deploy/);
+  assert.doesNotMatch(gate, /record-deployment/);
+  assert.match(record, /only after PayPal's real deployment step has succeeded/);
+  assert.match(record, /pact broker record-deployment/);
+  assert.doesNotMatch(record, /pact broker can-i-deploy/);
+});
+
+test('all official Pact stages use the digest-locked installer and secrets are references only', () => {
+  const names = [
+    'pact-consumer-publish.yaml',
+    'pact-provider-verify.yaml',
+    'pact-can-i-deploy.yaml',
+    'pact-record-deployment.yaml',
+  ];
+  for (const name of names) {
+    const { source, document } = stage(name);
+    const runSteps = document.stage.spec.execution.steps
+      .map(({ step }) => step)
+      .filter((step) => step.type === 'Run');
+    const attestation = runSteps.find((step) => step.identifier === 'attest_postman_cs_pact_harness');
+    const broker = runSteps.find((step) => /pact broker|pact verifier/.test(step.spec.command));
+    assert.match(source, /install-pact-cli\.mjs/);
+    assert.match(source, /pact-cli\.lock\.json/);
+    assert.match(source, /paypal_pact_broker_password/);
+    assert.match(source, /PACT_BROKER_USERNAME/);
+    assert.match(source, /PACT_BROKER_PASSWORD/);
+    assert.doesNotMatch(source, /PACT_BROKER_TOKEN/);
+    assert.match(source, /PACT_DO_NOT_TRACK: "true"/);
+    assert.equal(attestation.spec.image,
+      'node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4');
+    assert.equal(broker.spec.image,
+      'node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4');
+    assert.equal(broker.spec.envVariables.SSL_CERT_FILE, '/etc/ssl/certs/ca-certificates.crt');
+    assert.match(broker.spec.command, /test -r "\$SSL_CERT_FILE"/);
+    assert.match(broker.spec.command, /pact-broker-preflight\.mjs/);
+    assert.match(broker.spec.command, /--retries 3/);
+  }
+
+  const harnessSources = readdirSync(join(ROOT, 'harness'), { recursive: true })
+    .filter((name) => String(name).endsWith('.yaml'))
+    .map((name) => readFileSync(join(ROOT, 'harness', name), 'utf8'))
+    .join('\n');
+  assert.doesNotMatch(harnessSources, /PMAK-[A-Za-z0-9_-]+/);
+});
+
+test('the lower Broker proof keeps Postman and static gates before every Broker decision', () => {
+  const source = readFileSync(join(ROOT, 'harness', 'contract-gate.broker.pipeline.yaml'), 'utf8');
+  const pipeline = YAML.parse(source).pipeline;
+  const variables = Object.fromEntries(pipeline.variables.map((variable) => [variable.name, variable]));
+  const steps = Object.fromEntries(pipeline.stages[0].stage.spec.execution.steps
+    .map(({ step }) => [step.identifier, step]));
+  const fullNodeImage = 'node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4';
+  const slimNodeImage = 'node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7';
+  assert.equal(pipeline.stages[0].stage.name, 'Consumer first Broker');
+  const postman = source.indexOf('identifier: postman_static_preflight');
+  const existing = source.indexOf('identifier: existing_postman_provider_gate');
+  const collection = source.indexOf('identifier: postman_provider_collection');
+  const publish = source.indexOf('identifier: publish_seeded_consumer_pact');
+  const verify = source.indexOf('identifier: official_provider_verification');
+  const deploy = source.indexOf('identifier: broker_can_i_deploy_lower');
+  assert.ok(postman >= 0
+    && postman < existing
+    && existing < collection
+    && collection < publish
+    && publish < verify
+    && verify < deploy);
+  assert.doesNotMatch(source, /pact broker record-deployment/);
+  assert.ok((source.match(/paypal_contract_demo_token/g) ?? []).length >= 4,
+    'the lower provider, static gate, approved Collection, and official verifier must share the demo credential');
+  assert.doesNotMatch(source, /paypal_pact_provider_bearer_token/);
+  assert.match(source, /production consumer\r?\n# repositories must publish pacts created by executable tests/);
+  assert.equal(variables.REVIEWED_SOURCE_COMMIT.value, '<+input>');
+  assert.equal(variables.CONSUMER_PACT_BRANCH.value, '<+input>');
+  assert.equal(variables.PROVIDER_PACT_BRANCH.value, '<+input>');
+  assert.equal(variables.PROVIDER_COLLECTION_UID.value, '<+input>');
+  assert.equal(variables.PROVIDER_COLLECTION_WORKSPACE_ID.value, '<+input>');
+  assert.equal(variables.PROVIDER_COLLECTION_CANONICAL_SHA256.value, '<+input>');
+  assert.match(source, /EXPECTED_SOURCE_COMMIT: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /CONSUMER_APP_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /PROVIDER_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
+  assert.match(source, /CONSUMER_PACT_BRANCH: <\+pipeline\.variables\.CONSUMER_PACT_BRANCH>/);
+  assert.match(source, /PROVIDER_PACT_BRANCH: <\+pipeline\.variables\.PROVIDER_PACT_BRANCH>/);
+  assert.match(steps.postman_provider_collection.spec.command, /run-lower-collection\.mjs/);
+  assert.match(steps.postman_provider_collection.spec.command,
+    /--cloud[\s\S]{0,250}--workspace-id[\s\S]{0,250}--expected-sha256/);
+  assert.match(steps.official_provider_verification.spec.command,
+    /assert-pact-evidence\.mjs provider-verification/);
+  assert.match(steps.broker_can_i_deploy_lower.spec.command,
+    /assert-pact-evidence\.mjs can-i-deploy/);
+  assert.match(steps.broker_can_i_deploy_lower.spec.command,
+    /--pacticipant orders-checkout-consumer[\s\S]*--pacticipant paypal-orders/,
+    'the deployment decision must evaluate the explicit consumer/provider version pair');
+  assert.match(source, /broker publish[\s\S]{0,500}--retries 3[\s\S]{0,100}--log-level error/,
+    'the Broker proof must surface publication errors with bounded transient retries');
+  assert.equal((source.match(/--retries 3/g) ?? []).length, 3,
+    'publish, provider verification, and can-i-deploy must use the same bounded HTTP retry policy');
+  assert.equal((source.match(/SSL_CERT_FILE: \/etc\/ssl\/certs\/ca-certificates\.crt/g) ?? []).length, 3,
+    'every Pact CLI Broker step must explicitly use the Debian CA bundle');
+  assert.equal((source.match(/test -r "\$SSL_CERT_FILE"/g) ?? []).length, 3,
+    'every Pact CLI Broker step must fail closed when its CA bundle is unavailable');
+  for (const identifier of [
+    'source_attestation',
+    'publish_seeded_consumer_pact',
+    'official_provider_verification',
+    'broker_can_i_deploy_lower',
+  ]) assert.equal(steps[identifier].spec.image, fullNodeImage, `${identifier} must include Git or the CA bundle`);
+  for (const identifier of [
+    'postman_static_preflight',
+    'existing_postman_provider_gate',
+    'postman_provider_collection',
+  ]) {
+    assert.equal(steps[identifier].spec.image, slimNodeImage, `${identifier} should retain the smaller pinned image`);
+  }
+  assert.doesNotMatch(source, /<\+codebase\.branch>/,
+    'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
+});
+
+test('the seeded demonstration Pact declares deterministic provider states', () => {
+  const pact = JSON.parse(readFileSync(
+    join(ROOT, 'fixtures', 'paypal', 'orders-consumer.pact.json'),
+    'utf8',
+  ));
+  assert.ok(pact.interactions.length > 0);
+  for (const interaction of pact.interactions) {
+    assert.ok(Array.isArray(interaction.providerStates));
+    assert.ok(interaction.providerStates.length > 0);
+    assert.ok(interaction.providerStates.every(({ name }) => typeof name === 'string' && name.trim()));
+  }
+});

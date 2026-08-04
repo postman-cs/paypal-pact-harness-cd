@@ -1,0 +1,207 @@
+name: PayPal consumer contract gate
+description: >-
+  Consumer-authored Pact/OAS/Postman contract verification plus optional
+  bidirectional application-route comparison with explicit rogue detection.
+
+inputs:
+  provider-oas:
+    description: Repository-relative provider OpenAPI document.
+    required: true
+  consumer-contract:
+    description: Repository-relative consumer Pact, consumer OAS, or Postman collection.
+    required: true
+  consumer-format:
+    description: pact, oas, or postman.
+    required: false
+    default: pact
+  provider-name:
+    description: Provider identity used when converting an OAS or Postman collection to Pact.
+    required: false
+    default: paypal-orders
+  application-routes:
+    description: >-
+      Optional repository-relative application route inventory. Accepts Spring
+      Actuator mappings, generated OpenAPI, or [{method,path}] JSON.
+    required: false
+    default: ""
+  spec-subset:
+    description: Repository-relative include/exclude selector applied to contract and route checks.
+    required: true
+  contract-policy:
+    description: Repository-relative consumer, schema, security, negative-case, and example policy.
+    required: true
+  route-exceptions:
+    description: Repository-relative governed and expiring mismatch exception register.
+    required: true
+  baseline-oas:
+    description: Optional previous provider OAS for selected-surface breaking-change analysis.
+    required: false
+    default: ""
+  environment:
+    description: Environment name used to scope route exceptions.
+    required: false
+    default: lower
+  complete-results:
+    description: Run every module and emit an aggregate verdict instead of bailing after the first failure.
+    required: false
+    default: "true"
+  strip-prefix:
+    description: Optional application route prefix removed before comparison.
+    required: false
+    default: ""
+  route-policy:
+    description: block or warn.
+    required: false
+    default: block
+  report-directory:
+    description: Safe repository-relative output directory for JSON and JUnit evidence.
+    required: false
+    default: .contract-reports
+
+outputs:
+  consumer-pact:
+    description: Normalized consumer Pact used by the gate.
+    value: ${{ steps.paths.outputs.consumer-pact }}
+  bdc-junit:
+    description: Consumer contract JUnit report.
+    value: ${{ steps.paths.outputs.bdc-junit }}
+  route-json:
+    description: Bidirectional route-comparison JSON report, when application-routes is supplied.
+    value: ${{ steps.paths.outputs.route-json }}
+  route-junit:
+    description: Bidirectional route-comparison JUnit report, when application-routes is supplied.
+    value: ${{ steps.paths.outputs.route-junit }}
+  gate-json:
+    description: Aggregate complete-results JSON report.
+    value: ${{ steps.paths.outputs.gate-json }}
+  gate-junit:
+    description: Aggregate complete-results JUnit report.
+    value: ${{ steps.paths.outputs.gate-junit }}
+
+runs:
+  using: composite
+  steps:
+    - id: guard
+      name: Validate contract gate inputs
+      shell: bash
+      env:
+        PROVIDER_OAS: ${{ inputs.provider-oas }}
+        CONSUMER_CONTRACT: ${{ inputs.consumer-contract }}
+        CONSUMER_FORMAT: ${{ inputs.consumer-format }}
+        APPLICATION_ROUTES: ${{ inputs.application-routes }}
+        SPEC_SUBSET: ${{ inputs.spec-subset }}
+        CONTRACT_POLICY: ${{ inputs.contract-policy }}
+        ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
+        BASELINE_OAS: ${{ inputs.baseline-oas }}
+        ROUTE_POLICY: ${{ inputs.route-policy }}
+        COMPLETE_RESULTS: ${{ inputs.complete-results }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: |
+        set -euo pipefail
+        case "$CONSUMER_FORMAT" in pact|oas|postman) ;; *)
+          echo "::error::consumer-format must be pact, oas, or postman"; exit 2 ;;
+        esac
+        case "$ROUTE_POLICY" in block|warn) ;; *)
+          echo "::error::route-policy must be block or warn"; exit 2 ;;
+        esac
+        case "$COMPLETE_RESULTS" in true|false) ;; *)
+          echo "::error::complete-results must be true or false"; exit 2 ;;
+        esac
+        for path in "$PROVIDER_OAS" "$CONSUMER_CONTRACT" "$APPLICATION_ROUTES" \
+          "$SPEC_SUBSET" "$CONTRACT_POLICY" "$ROUTE_EXCEPTIONS" "$BASELINE_OAS" \
+          "$REPORT_DIRECTORY"; do
+          case "$path" in
+            /*|..|../*|*/../*|*/..) echo "::error::paths must be safe and repository-relative"; exit 2 ;;
+          esac
+        done
+        test -f "$PROVIDER_OAS"
+        test -f "$CONSUMER_CONTRACT"
+        test -f "$SPEC_SUBSET"
+        test -f "$CONTRACT_POLICY"
+        test -f "$ROUTE_EXCEPTIONS"
+        for optional in "$APPLICATION_ROUTES" "$BASELINE_OAS"; do
+          test -z "$optional" || test -f "$optional"
+        done
+        mkdir -p "$REPORT_DIRECTORY"
+
+    - id: paths
+      name: Normalize the consumer-authored contract
+      shell: bash
+      env:
+        CONSUMER_CONTRACT: ${{ inputs.consumer-contract }}
+        CONSUMER_FORMAT: ${{ inputs.consumer-format }}
+        PROVIDER_NAME: ${{ inputs.provider-name }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: |
+        set -euo pipefail
+        PACT="$REPORT_DIRECTORY/consumer.pact.json"
+        case "$CONSUMER_FORMAT" in
+          pact)
+            cp "$CONSUMER_CONTRACT" "$PACT"
+            ;;
+          oas)
+            node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" oas-to-pact \
+              --oas "$CONSUMER_CONTRACT" --provider "$PROVIDER_NAME" --out "$PACT"
+            ;;
+          postman)
+            node "$GITHUB_ACTION_PATH/tools/pact-harness/pact-harness.mjs" postman-to-pact \
+              --collection "$CONSUMER_CONTRACT" --provider "$PROVIDER_NAME" --out "$PACT"
+            ;;
+        esac
+        echo "consumer-pact=$PACT" >> "$GITHUB_OUTPUT"
+        echo "bdc-junit=$REPORT_DIRECTORY/consumer-bdc.xml" >> "$GITHUB_OUTPUT"
+        echo "route-json=$REPORT_DIRECTORY/route-contract.json" >> "$GITHUB_OUTPUT"
+        echo "route-junit=$REPORT_DIRECTORY/route-contract.xml" >> "$GITHUB_OUTPUT"
+        echo "gate-json=$REPORT_DIRECTORY/contract-gate-summary.json" >> "$GITHUB_OUTPUT"
+        echo "gate-junit=$REPORT_DIRECTORY/contract-gate-summary.xml" >> "$GITHUB_OUTPUT"
+
+    - id: provenance
+      name: Verify the bundled Postman-CS dependency
+      shell: bash
+      run: |
+        set -euo pipefail
+        node --input-type=module <<'NODE'
+        import { createHash } from 'node:crypto';
+        import { readFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const root = process.env.GITHUB_ACTION_PATH;
+        const lock = JSON.parse(readFileSync(join(root, 'postman-cs.lock.json')));
+        const content = readFileSync(join(root, 'tools/pact-harness/vendor/postman-cs/compare-routes.mjs'));
+        const actual = createHash('sha256').update(content).digest('hex');
+        const expected = lock.artifacts['compare-routes'].sha256;
+        if (actual !== expected) throw new Error(`Postman-CS comparator digest mismatch: ${actual}`);
+        console.log(`verified postman-cs comparator sha256=${actual}`);
+        NODE
+
+    - id: gate
+      name: Run the complete modular contract gate
+      shell: bash
+      env:
+        PROVIDER_OAS: ${{ inputs.provider-oas }}
+        BASELINE_OAS: ${{ inputs.baseline-oas }}
+        PACT: ${{ steps.paths.outputs.consumer-pact }}
+        APPLICATION_ROUTES: ${{ inputs.application-routes }}
+        SPEC_SUBSET: ${{ inputs.spec-subset }}
+        CONTRACT_POLICY: ${{ inputs.contract-policy }}
+        ROUTE_EXCEPTIONS: ${{ inputs.route-exceptions }}
+        STRIP_PREFIX: ${{ inputs.strip-prefix }}
+        ROUTE_POLICY: ${{ inputs.route-policy }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPLETE_RESULTS: ${{ inputs.complete-results }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: |
+        set -euo pipefail
+        set -- \
+          --oas "$PROVIDER_OAS" \
+          --pact "$PACT" \
+          --subset "$SPEC_SUBSET" \
+          --policy "$CONTRACT_POLICY" \
+          --exceptions "$ROUTE_EXCEPTIONS" \
+          --environment "$ENVIRONMENT" \
+          --route-policy "$ROUTE_POLICY" \
+          --report-dir "$REPORT_DIRECTORY"
+        test -z "$BASELINE_OAS" || set -- "$@" --baseline "$BASELINE_OAS"
+        test -z "$APPLICATION_ROUTES" || set -- "$@" --routes "$APPLICATION_ROUTES"
+        test -z "$STRIP_PREFIX" || set -- "$@" --strip-prefix "$STRIP_PREFIX"
+        test "$COMPLETE_RESULTS" != true || set -- "$@" --complete-results
+        node "$GITHUB_ACTION_PATH/scripts/run-contract-gate.mjs" "$@"

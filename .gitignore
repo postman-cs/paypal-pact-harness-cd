@@ -1,4 +1,17 @@
 .demo-tmp/
 node_modules/
+dist/
+.contract-reports/
+.contract-inputs/
+.contract-handoff/
+.pact/
+.pacts/
+.postman-cli/
+.ci-home/
+.m2/
+.maven-home/
+.local/
+.ledger/
+demo/orders-spring/target/
 *.log
 .DS_Store

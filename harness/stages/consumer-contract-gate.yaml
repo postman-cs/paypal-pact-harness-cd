@@ -1,0 +1,221 @@
+# PAYPAL TPE DROP-IN
+#
+# Import this stage immediately before an existing promotion stage. Contract
+# paths, subset, policy, exceptions, and report settings live in one reviewed
+# repository profile. Harness supplies only its connectors, lower runtime URLs,
+# and secrets.
+stage:
+  name: Contract - Consumer and route gate
+  identifier: consumer_contract_gate
+  type: CI
+  variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
+    - name: config_path
+      type: String
+      required: true
+      value: <+input>.default(paypal-contract-gate.config.json)
+    - name: app_base_url
+      type: String
+      required: true
+      value: <+input>
+    - name: actuator_url
+      type: String
+      required: true
+      value: <+input>
+    - name: generated_openapi_url
+      type: String
+      required: true
+      value: <+input>
+    - name: postman_collection
+      type: String
+      required: true
+      value: <+input>
+    - name: postman_cloud
+      type: String
+      required: true
+      value: <+input>.default(true)
+    - name: postman_collection_workspace_id
+      type: String
+      value: <+input>.default("")
+    - name: postman_collection_sha256
+      type: String
+      value: <+input>.default("")
+  spec:
+    cloneCodebase: true
+    platform:
+      os: Linux
+      arch: Amd64
+    execution:
+      steps:
+        - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: tag
+                spec:
+                  tag: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
+            type: Run
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
+              command: |
+                set -eu
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+        - step:
+            type: Run
+            name: Verify the lower service from the repository profile
+            identifier: verify_lower_contract_profile
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                CONFIG_PATH: <+stage.variables.config_path>
+                PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
+                PAYPAL_CONTRACT_OPENAPI_URL: <+stage.variables.generated_openapi_url>
+                INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+              command: |
+                set -eu
+                node .pact-harness-source/paypal-contract-gate.mjs verify \
+                  --config "$CONFIG_PATH" \
+                  --clean
+              reports:
+                type: JUnit
+                spec:
+                  paths:
+                    - .contract-reports/contract-gate-summary.xml
+                    - .contract-reports/oas-audit.xml
+                    - .contract-reports/oas-diff.xml
+                    - .contract-reports/consumer-bdc.xml
+                    - .contract-reports/route-contract.xml
+                    - .contract-reports/generated-openapi-route-contract.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
+        - step:
+            type: Run
+            name: Postman CLI lower-environment cases
+            identifier: postman_cli_lower_cases
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                APP_BASE_URL: <+stage.variables.app_base_url>
+                POSTMAN_COLLECTION: <+stage.variables.postman_collection>
+                POSTMAN_CLOUD: <+stage.variables.postman_cloud>
+                POSTMAN_COLLECTION_WORKSPACE_ID: <+stage.variables.postman_collection_workspace_id>
+                POSTMAN_COLLECTION_SHA256: <+stage.variables.postman_collection_sha256>
+                POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
+                CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+              command: |
+                set -eu
+                export HOME="$PWD/.ci-home"
+                mkdir -p "$HOME"
+                npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                export PATH="$PWD/.postman-cli/bin:$PATH"
+                case "$POSTMAN_CLOUD" in
+                  true|false) ;;
+                  *) echo "postman_cloud must be true or false" >&2; exit 2 ;;
+                esac
+                set -- \
+                  --collection "$POSTMAN_COLLECTION" \
+                  --base-url "$APP_BASE_URL" \
+                  --out-dir .contract-reports/postman
+                [ "$POSTMAN_CLOUD" = false ] || set -- "$@" \
+                  --cloud \
+                  --workspace-id "$POSTMAN_COLLECTION_WORKSPACE_ID" \
+                  --expected-sha256 "$POSTMAN_COLLECTION_SHA256"
+                node .pact-harness-source/tools/pact-harness/scripts/postman/run-lower-collection.mjs "$@"
+              reports:
+                type: JUnit
+                spec:
+                  paths:
+                    - .contract-reports/postman/postman-run.xml
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.5"
+        - step:
+            type: Run
+            name: Seal all JSON and JUnit evidence
+            identifier: seal_all_evidence
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              command: |
+                set -eu
+                node --input-type=module <<'NODE'
+                import { createHash } from 'node:crypto';
+                import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+                const files = readdirSync('.contract-reports', { recursive: true })
+                  .map(String)
+                  .filter((file) =>
+                    file !== 'evidence-manifest.json' &&
+                    (file.endsWith('.json') || file.endsWith('.xml') || file.endsWith('.txt')))
+                  .sort();
+                const evidence = files.map((file) => {
+                  const content = readFileSync(`.contract-reports/${file}`);
+                  return {
+                    file,
+                    bytes: content.length,
+                    sha256: createHash('sha256').update(content).digest('hex'),
+                  };
+                });
+                writeFileSync(
+                  '.contract-reports/evidence-manifest.json',
+                  `${JSON.stringify({ schemaVersion: 1, files: evidence }, null, 2)}\n`,
+                );
+                console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
+                NODE
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+    infrastructure:
+      type: KubernetesDirect
+      spec:
+        connectorRef: <+input>
+        namespace: <+input>
+        automountServiceAccountToken: false
+        nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        os: Linux

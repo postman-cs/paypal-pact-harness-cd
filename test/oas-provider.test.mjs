@@ -17,9 +17,12 @@ const consumerOas = loadDoc(join(FIX, 'checkout-consumer-oas.json'));
 test('oasToPact turns a consumer OAS into a pact of the fields it declares', () => {
   const pact = oasToPact(consumerOas, { provider: 'paypal-orders', consumer: 'checkout-consumer' });
   assert.equal(pact.consumer.name, 'checkout-consumer');
-  assert.equal(pact.interactions.length, 1);
+  assert.equal(pact.interactions.length, 2);
   const body = pact.interactions[0].response.body;
   assert.deepEqual(Object.keys(body).sort(), ['id', 'intent', 'purchase_units', 'status']);
+  assert.equal(pact.interactions[0].response.status, 200);
+  assert.equal(pact.interactions[1].response.status, 404);
+  assert.match(pact.interactions[1].description, /404/);
 });
 
 test('OAS-vs-OAS: consumer OAS verifies against the provider OAS, breaks on drift', () => {

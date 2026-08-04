@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "environment": "lower",
+  "provider": {
+    "name": "paypal-orders",
+    "oas": "fixtures/paypal/checkout_orders_v2.json",
+    "baseline": "fixtures/paypal/checkout_orders_v2.json"
+  },
+  "consumer": {
+    "format": "pact",
+    "contract": "fixtures/paypal/orders-consumer.pact.json"
+  },
+  "application": {
+    "routes": "fixtures/paypal/orders-spring-routes.json",
+    "actuatorUrl": "",
+    "generatedOpenApiUrl": "",
+    "gatewayInventoryUrl": "",
+    "runtimeTrafficUrl": "",
+    "stripPrefix": ""
+  },
+  "policy": {
+    "subset": "config/subsets/orders-demo.json",
+    "contract": "config/contract-policy.json",
+    "exceptions": "config/route-exceptions.json",
+    "route": "block",
+    "completeResults": true
+  },
+  "reports": {
+    "directory": ".contract-reports"
+  },
+  "postman": {
+    "enabled": false,
+    "collection": "fixtures/paypal/orders-lower.postman_collection.json",
+    "baseUrl": "",
+    "cloud": false,
+    "workspaceId": "",
+    "collectionSha256": ""
+  }
+}

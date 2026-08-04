@@ -1,0 +1,359 @@
+{
+  "info": {
+    "name": "PayPal Orders lower-environment contract proof",
+    "description": "Stateless positive and negative checks for the Orders Spring wrapper. No customer or payment data is created.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://orders-spring.paypal-contract-lower.svc.cluster.local:8080"
+    },
+    {
+      "key": "contractToken",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Negative - missing bearer token is rejected",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/missing-auth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('missing bearer token returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "pm.test('auth failure is structured and contains no secret', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.name).to.eql('AUTHENTICATION_FAILURE');",
+              "  pm.expect(pm.response.text()).not.to.include(pm.variables.get('contractToken'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - consumer response shape",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('consumer contract response is available', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.id).to.be.a('string');",
+              "  pm.expect(body.status).to.be.a('string');",
+              "  pm.expect(body.intent).to.be.a('string');",
+              "  pm.expect(body.purchase_units[0].amount.currency_code).to.eql('USD');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - stateless create example",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "contract-{{$guid}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"intent\":\"CAPTURE\"}"
+        },
+        "url": "{{baseUrl}}/v2/checkout/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('create is isolated and successful', function () {",
+              "  pm.response.to.have.status(201);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.status).to.eql('CREATED');",
+              "  pm.expect(body.id).to.be.a('string');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - patch order",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[{\"op\":\"replace\",\"path\":\"/intent\",\"value\":\"CAPTURE\"}]"
+        },
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('patch order route is available', function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - confirm payment source",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T/confirm-payment-source"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('confirm payment source route is available', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('APPROVED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - authorize order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T/authorize"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('authorize route is available', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().intent).to.eql('AUTHORIZE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - capture order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T/capture"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('capture route is available', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('COMPLETED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - add tracking",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tracking_number\":\"TRACK-1\",\"carrier\":\"UPS\"}"
+        },
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T/track"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('tracking route is available', function () {",
+              "  pm.response.to.have.status(201);",
+              "  pm.expect(pm.response.json().tracker_id).to.eql('TRACKER-1');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - patch tracker",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[{\"op\":\"replace\",\"path\":\"/status\",\"value\":\"DELIVERED\"}]"
+        },
+        "url": "{{baseUrl}}/v2/checkout/orders/5O190127TN364715T/trackers/TRACKER-1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('patch tracker route is available', function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Positive - order update callback",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{contractToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"id\":\"WH-LOWER-CONTRACT\",\"event_type\":\"CHECKOUT.ORDER.APPROVED\"}"
+        },
+        "url": "{{baseUrl}}/v2/checkout/orders/order-update-callback"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('order update callback route is available', function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Negative - invalid bearer token is rejected",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer deliberately-invalid"
+          }
+        ],
+        "url": "{{baseUrl}}/v2/checkout/orders/invalid-auth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('invalid bearer token returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

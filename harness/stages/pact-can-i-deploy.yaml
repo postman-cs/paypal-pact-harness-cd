@@ -1,0 +1,146 @@
+# PROMOTION GATE
+# Import immediately before PayPal's existing deployment/promotion stage.
+stage:
+  name: Pact - Can I deploy
+  identifier: pact_can_i_deploy
+  type: CI
+  variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
+    - name: broker_base_url
+      type: String
+      required: true
+      value: <+input>
+    - name: broker_username
+      type: String
+      required: true
+      value: <+input>.default(pact)
+    - name: pacticipant
+      type: String
+      required: true
+      value: <+input>
+    - name: version
+      type: String
+      required: true
+      value: <+input>.default(<+codebase.commitSha>)
+    - name: target_environment
+      type: String
+      required: true
+      value: <+input>
+  spec:
+    cloneCodebase: true
+    platform:
+      os: Linux
+      arch: Amd64
+    execution:
+      steps:
+        - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: tag
+                spec:
+                  tag: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
+            type: Run
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
+            spec:
+              connectorRef: <+input>
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
+              command: |
+                set -eu
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+        - step:
+            type: Run
+            name: Fail closed on the broker deployment matrix
+            identifier: broker_can_i_deploy
+            spec:
+              connectorRef: <+input>
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+              shell: Sh
+              envVariables:
+                PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
+                PACT_BROKER_USERNAME: <+stage.variables.broker_username>
+                PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
+                PACT_DO_NOT_TRACK: "true"
+                SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+                PACTICIPANT: <+stage.variables.pacticipant>
+                PACTICIPANT_VERSION: <+stage.variables.version>
+                TARGET_ENVIRONMENT: <+stage.variables.target_environment>
+              command: |
+                set -eu
+                REPORTS=.contract-reports/pact-deploy
+                mkdir -p "$REPORTS"
+                rm -f "$REPORTS/can-i-deploy.json" \
+                  "$REPORTS/can-i-deploy.stderr.txt"
+                test -r "$SSL_CERT_FILE"
+                node .pact-harness-source/scripts/ci/pact-broker-preflight.mjs
+                node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
+                  --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
+                  --output .pact/bin/pact
+
+                set +e
+                .pact/bin/pact broker can-i-deploy \
+                  --pacticipant "$PACTICIPANT" \
+                  --version "$PACTICIPANT_VERSION" \
+                  --to-environment "$TARGET_ENVIRONMENT" \
+                  --retries 3 \
+                  --retry-while-unknown 6 \
+                  --retry-interval 10 \
+                  --output json \
+                  > "$REPORTS/can-i-deploy.json" \
+                  2> "$REPORTS/can-i-deploy.stderr.txt"
+                status=$?
+                set -e
+                cat "$REPORTS/can-i-deploy.stderr.txt" >&2
+                cat "$REPORTS/can-i-deploy.json"
+                node .pact-harness-source/scripts/ci/assert-pact-evidence.mjs \
+                  can-i-deploy \
+                  --json "$REPORTS/can-i-deploy.json"
+                [ "$status" -eq 0 ]
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+    infrastructure:
+      type: KubernetesDirect
+      spec:
+        connectorRef: <+input>
+        namespace: <+input>.default(paypal-contract-lower)
+        automountServiceAccountToken: false
+        nodeSelector: {}
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: "1000"
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        os: Linux

@@ -58,13 +58,21 @@ function pathFromUrl(url) {
   return '/' + segs.join('/');
 }
 
-/** Parse a body string as JSON when possible, else return the raw string (or undefined). */
-function parseBody(raw) {
+function declaresJson(headers, body) {
+  const contentType = (headers ?? []).find((header) =>
+    !header?.disabled && String(header?.key ?? '').toLowerCase() === 'content-type');
+  return String(contentType?.value ?? '').toLowerCase().includes('json') ||
+    String(body?.options?.raw?.language ?? '').toLowerCase() === 'json';
+}
+
+/** Parse a body string as JSON when possible; never hide malformed declared JSON as text. */
+function parseBody(raw, { json, label }) {
   if (raw === undefined || raw === null || raw === '') return undefined;
   if (typeof raw !== 'string') return raw;
   try {
     return JSON.parse(raw);
   } catch {
+    if (json) throw new Error(`${label} declares JSON but is not valid JSON`);
     return raw;
   }
 }
@@ -102,12 +110,22 @@ export function postmanToPact(collection, opts) {
         path: pathFromUrl(req.url),
         query: queryToObject(req.url?.query),
         headers: headersToObject(req.header, { dropVolatile }),
-        body: parseBody(req.body?.raw),
+        body: parseBody(req.body?.raw, {
+          json: declaresJson(req.header, req.body),
+          label: `${item.name ?? 'unnamed request'} request body`,
+        }),
       };
+      const status = Number(example.code ?? 200);
+      if (!Number.isInteger(status) || status < 100 || status > 599) {
+        throw new Error(`${item.name ?? 'unnamed request'} saved example has an invalid HTTP status`);
+      }
       const response = {
-        status: Number(example.code ?? 200),
+        status,
         headers: headersToObject(example.header, { dropVolatile }),
-        body: parseBody(example.body),
+        body: parseBody(example.body, {
+          json: declaresJson(example.header),
+          label: `${item.name ?? 'unnamed request'} saved response body`,
+        }),
       };
       const description = `${item.name} (${response.status})`;
       interactions.push(buildInteraction({ description, request, response }));

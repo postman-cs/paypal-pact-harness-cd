@@ -1,0 +1,216 @@
+# First customer validation: this modular CI stage runs on KubernetesDirect
+# against the authenticated Orders Spring Boot wrapper in the lower environment.
+# Harness applies a 500Mi floor to CI step containers. The Spring background
+# container is intentionally capped at 640Mi so the complete build pod fits the
+# existing 8Gi lower K3s node without displacing customer workloads.
+pipeline:
+  name: PayPal contract gate - lower
+  identifier: paypal_contract_gate_lower
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>
+        repoName: paypal-pact-harness-cd
+        build: <+input>
+  variables:
+    - name: POSTMAN_COLLECTION_ID
+      type: String
+      value: <+input>
+    - name: POSTMAN_COLLECTION_WORKSPACE_ID
+      type: String
+      value: <+input>
+    - name: POSTMAN_COLLECTION_SHA256
+      type: String
+      value: <+input>
+  stages:
+    - stage:
+        name: Contract - Consumer and route gate
+        identifier: consumer_contract_gate
+        type: CI
+        variables:
+          - name: config_path
+            type: String
+            value: paypal-contract-gate.config.json
+          - name: app_base_url
+            type: String
+            value: http://127.0.0.1:8080
+          - name: actuator_url
+            type: String
+            value: http://127.0.0.1:8080/actuator/mappings
+          - name: generated_openapi_url
+            type: String
+            value: http://127.0.0.1:8080/v3/api-docs
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Attest Postman-CS source and portable CLI
+                  identifier: source_attestation
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
+                    shell: Sh
+                    envVariables:
+                      EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                    command: |
+                      set -eu
+                      node scripts/ci/attest-harness-source.mjs
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+              - step:
+                  type: Background
+                  name: Orders Spring Boot lower environment
+                  identifier: orders_spring_lower_environment
+                  spec:
+                    connectorRef: <+input>
+                    image: maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237
+                    shell: Sh
+                    envVariables:
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      WORKSPACE="$PWD"
+                      mkdir -p "$WORKSPACE/.m2/repository" "$WORKSPACE/.maven-home"
+                      export MAVEN_OPTS="-Duser.home=$WORKSPACE/.maven-home"
+                      cd demo/orders-spring
+                      mvn -B \
+                        -Dmaven.repo.local="$WORKSPACE/.m2/repository" \
+                        -DskipTests package
+                      exec java -jar target/orders-spring-wrapper-0.1.0.jar
+                    resources:
+                      limits:
+                        memory: 640Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Verify the live lower service from one profile
+                  identifier: verify_lower_contract_profile
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      PAYPAL_CONTRACT_ACTUATOR_URL: <+stage.variables.actuator_url>
+                      PAYPAL_CONTRACT_OPENAPI_URL: <+stage.variables.generated_openapi_url>
+                      PAYPAL_CONTRACT_INVENTORY_ATTEMPTS: "60"
+                      INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      node paypal-contract-gate.mjs verify \
+                        --config '<+stage.variables.config_path>' \
+                        --clean
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/contract-gate-summary.xml
+                          - .contract-reports/oas-audit.xml
+                          - .contract-reports/oas-diff.xml
+                          - .contract-reports/consumer-bdc.xml
+                          - .contract-reports/route-contract.xml
+                          - .contract-reports/generated-openapi-route-contract.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+              - step:
+                  type: Run
+                  name: Postman CLI lower-environment cases
+                  identifier: postman_cli_lower_cases
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      export HOME="$PWD/.ci-home"
+                      mkdir -p "$HOME"
+                      npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                      export PATH="$PWD/.postman-cli/bin:$PATH"
+                      if [ -n '<+pipeline.variables.POSTMAN_COLLECTION_ID>' ]; then
+                        node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
+                          --collection '<+pipeline.variables.POSTMAN_COLLECTION_ID>' \
+                          --base-url '<+stage.variables.app_base_url>' \
+                          --out-dir .contract-reports/postman \
+                          --cloud \
+                          --workspace-id '<+pipeline.variables.POSTMAN_COLLECTION_WORKSPACE_ID>' \
+                          --expected-sha256 '<+pipeline.variables.POSTMAN_COLLECTION_SHA256>'
+                      else
+                        node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
+                          --collection fixtures/paypal/orders-lower.postman_collection.json \
+                          --base-url '<+stage.variables.app_base_url>' \
+                          --out-dir .contract-reports/postman
+                      fi
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/postman/postman-run.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
+                  name: Seal all JSON and JUnit evidence
+                  identifier: seal_all_evidence
+                  spec:
+                    connectorRef: <+input>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    command: |
+                      set -eu
+                      node --input-type=module <<'NODE'
+                      import { createHash } from 'node:crypto';
+                      import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+                      const files = readdirSync('.contract-reports', { recursive: true })
+                        .map(String)
+                        .filter((file) =>
+                          file !== 'evidence-manifest.json' &&
+                          (file.endsWith('.json') || file.endsWith('.xml') || file.endsWith('.txt')))
+                        .sort();
+                      const evidence = files.map((file) => {
+                        const content = readFileSync(`.contract-reports/${file}`);
+                        return {
+                          file,
+                          bytes: content.length,
+                          sha256: createHash('sha256').update(content).digest('hex'),
+                        };
+                      });
+                      writeFileSync(
+                        '.contract-reports/evidence-manifest.json',
+                        `${JSON.stringify({ schemaVersion: 1, files: evidence }, null, 2)}\n`,
+                      );
+                      console.log(JSON.stringify({ evidenceManifest: evidence }, null, 2));
+                      NODE
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.25"
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: <+input>
+              namespace: default
+              automountServiceAccountToken: false
+              nodeSelector: {}
+              containerSecurityContext:
+                runAsNonRoot: true
+                runAsUser: "1000"
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              os: Linux
