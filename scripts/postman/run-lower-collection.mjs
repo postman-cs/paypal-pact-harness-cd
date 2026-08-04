@@ -188,6 +188,69 @@ function reporterStat(stats, name) {
   };
 }
 
+function postmanCliReporterEvidence(run) {
+  const summary = run.summary;
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
+  const executedRequests = summary.executedRequests;
+  const tests = summary.tests;
+  if (!executedRequests || typeof executedRequests !== 'object' || Array.isArray(executedRequests)) {
+    throw new Error('Postman JSON reporter is missing run.summary.executedRequests');
+  }
+  if (!tests || typeof tests !== 'object' || Array.isArray(tests)) {
+    throw new Error('Postman JSON reporter is missing run.summary.tests');
+  }
+  const requests = {
+    total: nonNegativeInteger(executedRequests.executed, 'run.summary.executedRequests.executed'),
+    failed: nonNegativeInteger(executedRequests.errors ?? 0, 'run.summary.executedRequests.errors'),
+    pending: 0,
+  };
+  const assertions = {
+    total: nonNegativeInteger(tests.executed, 'run.summary.tests.executed'),
+    failed: nonNegativeInteger(tests.failed ?? 0, 'run.summary.tests.failed'),
+    pending: nonNegativeInteger(tests.skipped ?? 0, 'run.summary.tests.skipped'),
+  };
+  if (!Array.isArray(run.executions)) throw new Error('Postman JSON reporter is missing run.executions');
+  if (run.executions.length !== requests.total) {
+    throw new Error(
+      `Postman JSON reporters disagree: executions=${run.executions.length}, requests=${requests.total}`,
+    );
+  }
+  let observedAssertions = 0;
+  for (const [index, execution] of run.executions.entries()) {
+    if (!execution?.requestExecuted || typeof execution.requestExecuted !== 'object') {
+      throw new Error(`Postman JSON reporter execution ${index + 1} is missing request evidence`);
+    }
+    if (!execution.response || typeof execution.response !== 'object') {
+      throw new Error(`Postman JSON reporter execution ${index + 1} is missing response evidence`);
+    }
+    if (!Array.isArray(execution.errors)) {
+      throw new Error(`Postman JSON reporter execution ${index + 1} is missing its error list`);
+    }
+    if (execution.errors.length > 0) {
+      throw new Error(`Postman JSON reporter execution ${index + 1} retained error evidence`);
+    }
+    if (!Array.isArray(execution.tests) || execution.tests.length === 0) {
+      throw new Error(`Postman JSON reporter execution ${index + 1} ran zero assertions`);
+    }
+    observedAssertions += execution.tests.length;
+    if (execution.tests.some((entry) => entry?.status === 'skipped')) {
+      throw new Error(`Postman JSON reporter execution ${index + 1} contains a skipped assertion`);
+    }
+    if (execution.tests.some((entry) => entry?.status !== 'passed')) {
+      throw new Error(`Postman JSON reporter execution ${index + 1} contains a non-passing assertion`);
+    }
+  }
+  if (observedAssertions !== assertions.total) {
+    throw new Error(
+      `Postman JSON reporters disagree: execution assertions=${observedAssertions}, summary assertions=${assertions.total}`,
+    );
+  }
+  if (run.runError !== null && run.runError !== undefined) {
+    throw new Error('Postman JSON reporter retained a run-level error');
+  }
+  return { reporterSchema: 'postman-cli', requests, assertions };
+}
+
 function xmlInteger(attributes, name) {
   const match = new RegExp(`\\b${name}="(\\d+)"`).exec(attributes);
   return match ? Number(match[1]) : 0;
@@ -215,21 +278,20 @@ export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
   if (!json?.run || typeof json.run !== 'object' || Array.isArray(json.run)) {
     throw new Error('Postman JSON reporter is missing run evidence');
   }
-  // Postman CLI 1.45 omits run.failures on a clean execution and emits an
-  // array only when failures exist. Explicit counters plus JUnit below remain
-  // the independent, non-vacuous evidence contract.
-  if (json.run.failures !== undefined && !Array.isArray(json.run.failures)) {
+  const postmanCliEvidence = postmanCliReporterEvidence(json.run);
+  if (!postmanCliEvidence && json.run.failures !== undefined && !Array.isArray(json.run.failures)) {
     throw new Error('Postman JSON reporter run.failures must be an array when present');
   }
-  const requests = reporterStat(json.run.stats, 'requests');
-  const assertions = reporterStat(json.run.stats, 'assertions');
+  const reporterSchema = postmanCliEvidence?.reporterSchema ?? 'newman';
+  const requests = postmanCliEvidence?.requests ?? reporterStat(json.run.stats, 'requests');
+  const assertions = postmanCliEvidence?.assertions ?? reporterStat(json.run.stats, 'assertions');
   if (requests.total === 0) throw new Error('Postman execution ran zero requests');
   if (requests.failed > 0) throw new Error(`Postman execution reported ${requests.failed} failed request(s)`);
   if (requests.pending > 0) throw new Error(`Postman execution reported ${requests.pending} skipped request(s)`);
   if (assertions.total === 0) throw new Error('Postman execution ran zero assertions');
   if (assertions.failed > 0) throw new Error(`Postman execution reported ${assertions.failed} failed assertion(s)`);
   if (assertions.pending > 0) throw new Error(`Postman execution reported ${assertions.pending} skipped assertion(s)`);
-  if ((json.run.failures?.length ?? 0) > 0) {
+  if (!postmanCliEvidence && (json.run.failures?.length ?? 0) > 0) {
     throw new Error(`Postman execution retained ${json.run.failures.length} failure record(s)`);
   }
 
@@ -240,7 +302,12 @@ export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
       `Postman JUnit reporter is not clean: failures=${junit.failures}, errors=${junit.errors}, skipped=${junit.skipped}`,
     );
   }
-  return { requests, assertions, junit };
+  if (junit.tests !== assertions.total) {
+    throw new Error(
+      `Postman JSON and JUnit reporters disagree: assertions=${assertions.total}, JUnit tests=${junit.tests}`,
+    );
+  }
+  return { reporterSchema, requests, assertions, junit };
 }
 
 async function pullCloudCollection({

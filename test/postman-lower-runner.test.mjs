@@ -33,10 +33,20 @@ function successfulPostman(calls) {
     if (args[0] === '--version') return { status: 0, stdout: '1.45.0\n', stderr: '' };
     writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({
       run: {
-        stats: {
-          requests: { total: 1, pending: 0, failed: 0 },
-          assertions: { total: 2, pending: 0, failed: 0 },
+        summary: {
+          executedRequests: { executed: 1, errors: 0 },
+          tests: { executed: 2, failed: 0, passed: 2, skipped: 0 },
         },
+        executions: [{
+          requestExecuted: { id: 'request-1', name: 'Get order', method: 'GET' },
+          response: { code: 200, status: 'OK' },
+          tests: [
+            { name: 'status is 200', status: 'passed' },
+            { name: 'schema is valid', status: 'passed' },
+          ],
+          errors: [],
+        }],
+        runError: null,
       },
     }));
     writeFileSync(
@@ -279,7 +289,7 @@ test('Postman execution rejects zero-assertion and skipped evidence even when th
   const source = join(sourceRoot, 'source.json');
   writeFileSync(source, JSON.stringify(collection()));
 
-  async function rejected(stats, junit, expected) {
+  async function rejectedRun(run, junit, expected) {
     let call = 0;
     await assert.rejects(runLowerCollection({
       collection: source,
@@ -290,22 +300,34 @@ test('Postman execution rejects zero-assertion and skipped evidence even when th
       spawnImpl: (_command, args) => {
         call += 1;
         if (call === 1) return { status: 0, stdout: '1.45.0\n', stderr: '' };
-        writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({
-          run: { failures: [], stats },
-        }));
+        writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({ run }));
         writeFileSync(args[args.indexOf('--reporter-junit-export') + 1], junit);
         return { status: 0, stdout: 'CLI exit 0\n', stderr: '' };
       },
     }), expected);
   }
 
-  await rejected({
+  await rejectedRun({ failures: [], stats: {
     requests: { total: 1, pending: 0, failed: 0 },
     assertions: { total: 0, pending: 0, failed: 0 },
-  }, '<testsuites tests="0" failures="0" errors="0" skipped="0"/>\n', /zero assertions/);
+  } }, '<testsuites tests="0" failures="0" errors="0" skipped="0"/>\n', /zero assertions/);
 
-  await rejected({
+  await rejectedRun({ failures: [], stats: {
     requests: { total: 1, pending: 1, failed: 0 },
     assertions: { total: 1, pending: 0, failed: 0 },
-  }, '<testsuites tests="1" failures="0" errors="0" skipped="1"/>\n', /skipped request/);
+  } }, '<testsuites tests="1" failures="0" errors="0" skipped="1"/>\n', /skipped request/);
+
+  await rejectedRun({
+    summary: {
+      executedRequests: { executed: 1, errors: 0 },
+      tests: { executed: 1, failed: 0, passed: 0, skipped: 1 },
+    },
+    executions: [{
+      requestExecuted: { id: 'request-1' },
+      response: { code: 200 },
+      tests: [{ name: 'skipped', status: 'skipped' }],
+      errors: [],
+    }],
+    runError: null,
+  }, '<testsuites tests="1" failures="0" errors="0" skipped="1"/>\n', /skipped assertion/);
 });
