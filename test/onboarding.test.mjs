@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -37,4 +38,14 @@ test('handoff documentation has no pre-release branch instructions', () => {
   assert.doesNotMatch(handoff, /Publish a protected release tag/);
   assert.match(downstream, /--branch v0\.6\.1/);
   assert.match(handoff, /protected release `v0\.6\.1`/);
+});
+
+test('GitHub release checks fetch immutable tags instead of using a shallow checkout', () => {
+  const workflow = YAML.parse(readFileSync(join(ROOT, '.github', 'workflows', 'contract-gate.yml'), 'utf8'));
+  const checkouts = Object.values(workflow.jobs).flatMap((job) =>
+    job.steps.filter((step) => String(step.uses ?? '').startsWith('actions/checkout@')));
+  assert.ok(checkouts.length >= 5, 'every workflow job that uses repository content must be covered');
+  for (const checkout of checkouts) {
+    assert.equal(checkout.with?.['fetch-depth'], 0, `${checkout.name} must fetch release tags`);
+  }
 });
