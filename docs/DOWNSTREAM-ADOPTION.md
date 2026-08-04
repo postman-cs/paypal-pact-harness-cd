@@ -10,21 +10,21 @@ available.
 
 ## 1. Acquire an immutable toolkit revision
 
-Until PR #1 is merged and tagged, clone the feature branch and verify the full
-commit supplied by Postman. Do not use a floating branch in a customer pipeline.
+Clone the protected toolkit release and verify the full commit supplied by
+Postman. Do not use a floating branch in a customer pipeline.
 
 ```bash
-git clone --branch agent/consumer-contract-e2e --single-branch \
+git clone --branch v0.5.0 --single-branch \
   https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
-git rev-parse HEAD
+test "$(git rev-parse HEAD)" = d099ca437e7b0b12933a1ff168b3d9699168698f
 node scripts/ci/attest-harness-source.mjs \
-  --expected-commit <FULL_POSTMAN_CS_COMMIT>
+  --expected-commit d099ca437e7b0b12933a1ff168b3d9699168698f
 ```
 
-The normal unqualified clone is not the release mechanism until the PR is on the
-default branch. A production handoff should use a merged commit plus a signed or
-protected release tag.
+The default branch is the maintained onboarding surface. Customer pipeline runtime
+bindings should use a signed or protected release tag and its independently
+reviewed full commit.
 
 ## 2. Vendor the portable bundle into the customer repository
 

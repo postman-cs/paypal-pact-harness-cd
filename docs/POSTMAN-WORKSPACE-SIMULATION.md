@@ -7,21 +7,27 @@ This phase-0 proof uses two team workspaces and keeps ownership explicit:
 | Consumer | `PayPal Pact Simulation - Consumer` | the narrow surface the checkout consumer relies on | consumer-owned saved request/response examples |
 | Provider | `PayPal Pact Simulation - Provider` | the fuller PayPal Orders provider contract | provider runtime and authentication checks |
 
-The setup command creates or reuses exact-name workspaces, specifications, and
+The demo seeder creates or reuses exact-name workspaces, specifications, and
 collections. It updates assets in place, rejects duplicate exact names, never
-deletes cloud resources, and writes only non-secret IDs and source digests.
+deletes cloud resources, and writes only non-secret IDs and source digests. Use it
+only when deliberately provisioning or resetting the supplied simulation assets.
+The inspector is read-only: it pulls, attests, and tests the bound cloud assets
+without modifying Postman.
 
 ```sh
 export POSTMAN_API_KEY='use-a-team-or-service-account-key'
-npm run postman:setup
-npm run postman:verify
+npm run postman:seed-demo # mutating and idempotent
+npm run postman:inspect   # read-only verification
 ```
 
 The default is a team workspace. For an individual API key that isn't operating
-in a team context, use `npm run postman:setup -- --workspace-type personal`.
+in a team context, use `npm run postman:seed-demo -- --workspace-type personal`.
 PayPal should keep the default and provision with its team/service-account key.
+The legacy `postman:setup` and `postman:verify` aliases remain available. All four
+commands execute the committed install-free bundle, so a customer clone does not
+need `npm install`.
 
-`postman:verify` pulls the exact single `ROOT` file for both live OAS documents
+`postman:inspect` pulls the exact single `ROOT` file for both live OAS documents
 and both live Collections, proves that every asset belongs to its declared
 workspace, and records byte and canonical SHA-256 provenance. It rejects
 multi-file or ambiguous-root specifications and fails if either OAS canonical

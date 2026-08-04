@@ -347,17 +347,23 @@ export async function setupWorkspaceSimulation({
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-  const output = await setupWorkspaceSimulation({
-    rootDir: arg('root', process.cwd()),
-    outPath: arg('out', 'config/postman-workspace-simulation.json'),
-    apiKey: process.env.POSTMAN_API_KEY,
-    apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
-    workspaceType: arg('workspace-type', process.env.POSTMAN_WORKSPACE_TYPE || 'team'),
-    teamId: arg('team-id', process.env.POSTMAN_TEAM_ID || ''),
-  });
-  for (const role of ['consumer', 'provider']) {
-    const item = output[role];
-    console.log(`[postman-setup] ${role} workspace=${item.workspace.id} (${item.workspace.action}) spec=${item.spec.id} (${item.spec.action}) collection=${item.collection.uid} (${item.collection.action})`);
+  try {
+    const output = await setupWorkspaceSimulation({
+      rootDir: arg('root', process.cwd()),
+      outPath: arg('out', 'config/postman-workspace-simulation.json'),
+      apiKey: process.env.POSTMAN_API_KEY,
+      apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
+      workspaceType: arg('workspace-type', process.env.POSTMAN_WORKSPACE_TYPE || 'team'),
+      teamId: arg('team-id', process.env.POSTMAN_TEAM_ID || ''),
+    });
+    for (const role of ['consumer', 'provider']) {
+      const item = output[role];
+      console.log(`[postman-setup] ${role} workspace=${item.workspace.id} (${item.workspace.action}) spec=${item.spec.id} (${item.spec.action}) collection=${item.collection.uid} (${item.collection.action})`);
+    }
+    console.log('[postman-setup] wrote non-secret binding config/postman-workspace-simulation.json');
+  } catch (error) {
+    console.error(`[FAIL] ${error.message}`);
+    console.error('Next: export POSTMAN_API_KEY from the approved service account, then rerun npm run postman:seed-demo.');
+    process.exitCode = 2;
   }
-  console.log('[postman-setup] wrote non-secret binding config/postman-workspace-simulation.json');
 }

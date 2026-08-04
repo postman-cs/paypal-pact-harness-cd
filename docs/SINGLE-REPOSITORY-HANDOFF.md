@@ -53,8 +53,8 @@ created and handled the interactions.
 The production consumer-driven lifecycle needs customer-owned work outside this
 single demonstration pipeline:
 
-1. Publish a protected release tag for the reviewed toolkit commit so every
-   additional-clone modular stage has an immutable `harness_source_ref`.
+1. Bind every additional-clone modular stage to protected release `v0.5.0` and
+   its reviewed full commit, or to a later protected toolkit release.
 2. Add `pact-consumer-publish.yaml` to each real consumer repository and run its
    Pact tests against the production client code. Do not publish the seeded fixture.
 3. Start the exact provider build and implement deterministic, CI-only provider

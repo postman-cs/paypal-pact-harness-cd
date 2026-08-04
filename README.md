@@ -20,6 +20,20 @@ The first command checks the machine, profile, files, and locked Postman-CS
 dependency. The second runs the complete lower-environment gate and writes JUnit,
 JSON, and checksums under `.contract-reports/`.
 
+For the complete Harness proof, one secret-free customer config now generates the
+entire 18-variable Input Set and its import checklist:
+
+```bash
+mkdir -p .contract-handoff
+cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
+# Replace the customer connector, namespace, and HTTPS Broker placeholders.
+npm run handoff:doctor
+npm run handoff:prepare
+```
+
+These commands also need no `npm install`. Generated customer bindings remain in
+the ignored `.contract-handoff/` directory; Harness secrets never enter the file.
+
 To adapt it, edit the single secret-free
 [`paypal-contract-gate.config.json`](paypal-contract-gate.config.json). For the
 five-minute handoff and live-service environment variables, see
@@ -139,6 +153,7 @@ text reporter artifacts are credential-redacted and re-sealed before publication
 | `tools/pact-harness/` | the committed, install-free CLI bundle (what the pipelines call) |
 | `paypal-contract-gate.mjs`, `paypal-contract-gate.config.json` | TPE-friendly entry point and single versioned profile |
 | `PAYPAL-TPE-QUICKSTART.md` | clone-to-green handoff and live lower-service setup |
+| `config/paypal-tpe-handoff.example.json`, `scripts/tpe/prepare-handoff.mjs` | one-file, secret-free Harness Input Set generator |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |
 | `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and optional standalone lower deployment |
 | `config/` | subset selectors, contract policy, governed exceptions, and app/spec graph |

@@ -72,6 +72,13 @@ test('drop-in Kubernetes stages declare limits and keep Postman CLI installation
   assert.doesNotMatch(consumer, /cd \.pact-harness-source/);
   assert.doesNotMatch(consumer, /fixtures\/paypal\/orders-lower/);
   assert.doesNotMatch(consumer, /\.pact-harness-source\/\.contract-reports/);
+  assert.doesNotMatch(consumer, /orders-spring\.paypal-contract-lower/);
+  const consumerStage = YAML.parse(consumer).stage;
+  const variables = Object.fromEntries(consumerStage.variables.map((variable) => [variable.name, variable.value]));
+  assert.equal(variables.app_base_url, '<+input>');
+  assert.equal(variables.actuator_url, '<+input>');
+  assert.equal(variables.generated_openapi_url, '<+input>');
+  assert.equal(consumerStage.spec.infrastructure.spec.namespace, '<+input>');
 });
 
 test('customer-owned stage verifies an externally locked bundle and never attests the customer repo as Postman-CS', () => {

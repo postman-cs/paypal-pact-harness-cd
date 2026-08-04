@@ -28,15 +28,15 @@ stage:
     - name: app_base_url
       type: String
       required: true
-      value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080)
+      value: <+input>
     - name: actuator_url
       type: String
       required: true
-      value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/actuator/mappings)
+      value: <+input>
     - name: generated_openapi_url
       type: String
       required: true
-      value: <+input>.default(http://orders-spring.paypal-contract-lower.svc.cluster.local:8080/v3/api-docs)
+      value: <+input>
     - name: postman_collection
       type: String
       required: true
@@ -208,7 +208,7 @@ stage:
       type: KubernetesDirect
       spec:
         connectorRef: <+input>
-        namespace: <+input>.default(paypal-contract-lower)
+        namespace: <+input>
         automountServiceAccountToken: false
         nodeSelector: {}
         containerSecurityContext:

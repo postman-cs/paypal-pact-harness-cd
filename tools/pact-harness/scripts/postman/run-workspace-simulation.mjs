@@ -14,6 +14,8 @@ import { postmanApiUrl, validatePostmanApiBase } from './postman-api-base.mjs';
 import { requireCanonicalSha256 } from './spec-file.mjs';
 import { resolveDedicatedSubtreePath } from '../../src/lib/path-safety.mjs';
 
+const TOOLKIT_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
   return index >= 0 ? process.argv[index + 1] : fallback;
@@ -163,7 +165,9 @@ export async function runWorkspaceSimulation({
     delete collection.content;
   }
 
-  const cli = resolve(rootDir, 'src/cli.mjs');
+  // Execute the CLI beside this script. This works from source and from the
+  // committed tools/pact-harness bundle, so a customer clone needs no install.
+  const cli = resolve(TOOLKIT_ROOT, 'src/cli.mjs');
   const providerOas = resolve(inputs, 'provider-oas.yaml');
   const consumerOasPact = resolve(inputs, 'consumer-oas.pact.json');
   const consumerCollectionPact = resolve(inputs, 'consumer-collection.pact.json');
@@ -190,13 +194,19 @@ export async function runWorkspaceSimulation({
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-  const result = await runWorkspaceSimulation({
-    rootDir: arg('root', process.cwd()),
-    configPath: arg('config', 'config/postman-workspace-simulation.json'),
-    outDir: arg('out-dir', '.contract-reports/postman-workspace-simulation'),
-    apiKey: process.env.POSTMAN_API_KEY,
-    apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
-  });
-  console.log(`[postman-simulation] PASS: ${result.classification}`);
-  console.log('[postman-simulation] evidence -> .contract-reports/postman-workspace-simulation/evidence.json');
+  try {
+    const result = await runWorkspaceSimulation({
+      rootDir: arg('root', process.cwd()),
+      configPath: arg('config', 'config/postman-workspace-simulation.json'),
+      outDir: arg('out-dir', '.contract-reports/postman-workspace-simulation'),
+      apiKey: process.env.POSTMAN_API_KEY,
+      apiBase: process.env.POSTMAN_API_BASE_URL || 'https://api.postman.com',
+    });
+    console.log(`[postman-simulation] PASS: ${result.classification}`);
+    console.log('[postman-simulation] evidence -> .contract-reports/postman-workspace-simulation/evidence.json');
+  } catch (error) {
+    console.error(`[FAIL] ${error.message}`);
+    console.error('Next: export POSTMAN_API_KEY from the approved service account, then rerun npm run postman:inspect.');
+    process.exitCode = 2;
+  }
 }

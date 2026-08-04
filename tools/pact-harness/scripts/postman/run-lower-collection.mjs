@@ -169,6 +169,77 @@ function sanitizeReporterArtifact(path, {
   }
 }
 
+function nonNegativeInteger(value, label) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Postman JSON reporter ${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function reporterStat(stats, name) {
+  const value = stats?.[name];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Postman JSON reporter is missing run.stats.${name}`);
+  }
+  return {
+    total: nonNegativeInteger(value.total, `run.stats.${name}.total`),
+    pending: nonNegativeInteger(value.pending ?? 0, `run.stats.${name}.pending`),
+    failed: nonNegativeInteger(value.failed ?? 0, `run.stats.${name}.failed`),
+  };
+}
+
+function xmlInteger(attributes, name) {
+  const match = new RegExp(`\\b${name}="(\\d+)"`).exec(attributes);
+  return match ? Number(match[1]) : 0;
+}
+
+function junitSummary(xml) {
+  const root = /<testsuites\b([^>]*)>/i.exec(xml);
+  const suites = root ? [root[1]] : [...xml.matchAll(/<testsuite\b([^>]*)>/gi)].map((match) => match[1]);
+  if (suites.length === 0) throw new Error('Postman JUnit reporter contains no test suite');
+  return suites.reduce((summary, attributes) => ({
+    tests: summary.tests + xmlInteger(attributes, 'tests'),
+    failures: summary.failures + xmlInteger(attributes, 'failures'),
+    errors: summary.errors + xmlInteger(attributes, 'errors'),
+    skipped: summary.skipped + xmlInteger(attributes, 'skipped'),
+  }), { tests: 0, failures: 0, errors: 0, skipped: 0 });
+}
+
+export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
+  let json;
+  try {
+    json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Postman JSON reporter is invalid: ${error.message}`);
+  }
+  if (!json?.run || typeof json.run !== 'object' || Array.isArray(json.run)) {
+    throw new Error('Postman JSON reporter is missing run evidence');
+  }
+  if (!Array.isArray(json.run.failures)) {
+    throw new Error('Postman JSON reporter is missing run.failures');
+  }
+  const requests = reporterStat(json.run.stats, 'requests');
+  const assertions = reporterStat(json.run.stats, 'assertions');
+  if (requests.total === 0) throw new Error('Postman execution ran zero requests');
+  if (requests.failed > 0) throw new Error(`Postman execution reported ${requests.failed} failed request(s)`);
+  if (requests.pending > 0) throw new Error(`Postman execution reported ${requests.pending} skipped request(s)`);
+  if (assertions.total === 0) throw new Error('Postman execution ran zero assertions');
+  if (assertions.failed > 0) throw new Error(`Postman execution reported ${assertions.failed} failed assertion(s)`);
+  if (assertions.pending > 0) throw new Error(`Postman execution reported ${assertions.pending} skipped assertion(s)`);
+  if (json.run.failures.length > 0) {
+    throw new Error(`Postman execution retained ${json.run.failures.length} failure record(s)`);
+  }
+
+  const junit = junitSummary(readFileSync(junitPath, 'utf8'));
+  if (junit.tests === 0) throw new Error('Postman JUnit reporter contains zero tests');
+  if (junit.failures > 0 || junit.errors > 0 || junit.skipped > 0) {
+    throw new Error(
+      `Postman JUnit reporter is not clean: failures=${junit.failures}, errors=${junit.errors}, skipped=${junit.skipped}`,
+    );
+  }
+  return { requests, assertions, junit };
+}
+
 async function pullCloudCollection({
   uid,
   workspaceId,
@@ -362,9 +433,11 @@ export async function runLowerCollection({
     if (execution.status !== 0) {
       throw new Error(`postman collection failed with exit ${execution.status ?? 1}`);
     }
+    const evidence = assertPostmanExecutionEvidence(jsonReportPath, junitReportPath);
     provenance.execution = {
       status: 'pass',
       postmanCliVersion: version,
+      evidence,
       reporterArtifacts,
     };
     atomicWrite(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`);

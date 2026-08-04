@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { downloadArtifact } from './resolve-postman-cs.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 // This repo vendors the built bundle at tools/pact-harness (what the pipelines call).
 const dist = join(root, 'tools', 'pact-harness');
 
@@ -84,7 +85,7 @@ writeFileSync(
   join(dist, 'package.json'),
   JSON.stringify({
     name: 'pact-harness-bundle',
-    version: '0.5.0',
+    version: packageVersion,
     private: true,
     type: 'module',
     bin: {

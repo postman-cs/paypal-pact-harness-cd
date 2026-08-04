@@ -71,9 +71,9 @@ digest-pinned Node image. A Java or .NET consumer team should copy that stage an
 replace only the generation step's image with an approved digest-pinned language
 runtime; the publication and attestation steps stay unchanged.
 
-Harness reads credentials only from the documented project secrets. The modular
-stage cannot be handed off on a floating development branch: Postman-CS must first
-publish a protected release tag for the reviewed commit.
+Harness reads credentials only from the documented project secrets. Use the
+protected `v0.5.0` toolkit tag and its reviewed full commit, or a later protected
+release; never bind a customer pipeline to a floating development branch.
 
 The contract, subset, policy, exceptions, and report location stay in the single
 versioned JSON profile. Harness injects credentials from secrets and runs the
@@ -93,11 +93,28 @@ codebase is `paypal-pact-harness-cd`; no second code repository is needed. The
 template uses neutral runtime inputs for the container registry, Kubernetes
 connector, and namespace.
 
-PayPal must still supply its own Postman workspace/spec/Collection identifiers and
-reviewed digests, Pact Broker URL, connector bindings, and Harness secrets. This
-proof uses the demo provider and seeded consumer Pact. It is not a substitute for
-consumer-generated contracts, a PayPal deployment, target-environment smoke tests,
-or `record-deployment`.
+The committed Postman binding already supplies the simulation workspace, Spec,
+Collection, and reviewed digest values. Generate the remaining Harness bindings
+from one customer-owned file:
+
+```bash
+mkdir -p .contract-handoff
+cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
+# Edit only the connector, Kubernetes namespace, and HTTPS Pact Broker placeholders.
+npm run handoff:doctor
+npm run handoff:prepare
+```
+
+The generator proves the selected release tag still resolves to its reviewed full
+commit, covers all 18 pipeline variables, and writes a secret-free Input Set plus
+an exact import checklist under `.contract-handoff/`. In Harness, create the Input
+Set for `paypal_postman_pact_broker_lower`, open its YAML editor, and paste the
+generated `paypal_pact_broker_lower.input-set.yaml`. Confirm the three project
+secrets named in the generated checklist, then run the Input Set.
+
+This proof uses the demo provider and seeded consumer Pact. It is not a substitute
+for consumer-generated contracts, a PayPal deployment, target-environment smoke
+tests, or `record-deployment`.
 
 ## Optional local Postman runtime cases
 

@@ -31,9 +31,20 @@ function successfulPostman(calls) {
   return (command, args, options) => {
     calls.push({ command, args, options });
     if (args[0] === '--version') return { status: 0, stdout: '1.45.0\n', stderr: '' };
-    writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({ run: { failures: [] } }));
-    writeFileSync(args[args.indexOf('--reporter-junit-export') + 1], '<testsuites tests="1" failures="0"/>\n');
-    return { status: 0, stdout: '1 request passed\n', stderr: '' };
+    writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({
+      run: {
+        failures: [],
+        stats: {
+          requests: { total: 1, pending: 0, failed: 0 },
+          assertions: { total: 2, pending: 0, failed: 0 },
+        },
+      },
+    }));
+    writeFileSync(
+      args[args.indexOf('--reporter-junit-export') + 1],
+      '<testsuites tests="2" failures="0" errors="0" skipped="0"/>\n',
+    );
+    return { status: 0, stdout: '1 request and 2 assertions passed\n', stderr: '' };
   };
 }
 
@@ -86,6 +97,8 @@ test('cloud lower run proves workspace and digest, then executes a sealed local 
   assert.equal(fetchCalls[0].searchParams.get('elementId'), 'user-orders');
   assert.equal(result.collection.canonicalSha256, expected);
   assert.equal(result.execution.status, 'pass');
+  assert.equal(result.execution.evidence.requests.total, 1);
+  assert.equal(result.execution.evidence.assertions.total, 2);
   assert.equal(spawnCalls.length, 2);
   for (const call of spawnCalls) {
     assert.equal(call.options.env.POSTMAN_API_KEY, undefined);
@@ -231,11 +244,21 @@ test('fake reporter leaks are sanitized before JSON, JUnit, and text artifacts a
       if (call === 1) return { status: 0, stdout: '1.45.0\n', stderr: '' };
       writeFileSync(
         args[args.indexOf('--reporter-json-export') + 1],
-        JSON.stringify({ leakedApiKey: apiKey, leakedDemoToken: demoToken }),
+        JSON.stringify({
+          leakedApiKey: apiKey,
+          leakedDemoToken: demoToken,
+          run: {
+            failures: [],
+            stats: {
+              requests: { total: 1, pending: 0, failed: 0 },
+              assertions: { total: 1, pending: 0, failed: 0 },
+            },
+          },
+        }),
       );
       writeFileSync(
         args[args.indexOf('--reporter-junit-export') + 1],
-        `<testsuite name="${apiKey}"><system-out>${demoToken} PMAK-unrelated-leak</system-out></testsuite>\n`,
+        `<testsuite name="${apiKey}" tests="1" failures="0" errors="0" skipped="0"><system-out>${demoToken} PMAK-unrelated-leak</system-out></testsuite>\n`,
       );
       return { status: 0, stdout: `ran with ${apiKey} and ${demoToken}\n`, stderr: '' };
     },
@@ -250,4 +273,40 @@ test('fake reporter leaks are sanitized before JSON, JUnit, and text artifacts a
   }
   assert.equal(result.execution.reporterArtifacts.length, 3);
   assert.ok(result.execution.reporterArtifacts.every((artifact) => artifact.sanitized));
+});
+
+test('Postman execution rejects zero-assertion and skipped evidence even when the CLI exits zero', async () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), 'postman-vacuous-evidence-'));
+  const source = join(sourceRoot, 'source.json');
+  writeFileSync(source, JSON.stringify(collection()));
+
+  async function rejected(stats, junit, expected) {
+    let call = 0;
+    await assert.rejects(runLowerCollection({
+      collection: source,
+      baseUrl: 'https://lower.example.test',
+      outDir: join(sourceRoot, `reports-${call}-${Math.random()}`),
+      demoToken: 'demo-token',
+      environment: { PATH: process.env.PATH },
+      spawnImpl: (_command, args) => {
+        call += 1;
+        if (call === 1) return { status: 0, stdout: '1.45.0\n', stderr: '' };
+        writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({
+          run: { failures: [], stats },
+        }));
+        writeFileSync(args[args.indexOf('--reporter-junit-export') + 1], junit);
+        return { status: 0, stdout: 'CLI exit 0\n', stderr: '' };
+      },
+    }), expected);
+  }
+
+  await rejected({
+    requests: { total: 1, pending: 0, failed: 0 },
+    assertions: { total: 0, pending: 0, failed: 0 },
+  }, '<testsuites tests="0" failures="0" errors="0" skipped="0"/>\n', /zero assertions/);
+
+  await rejected({
+    requests: { total: 1, pending: 1, failed: 0 },
+    assertions: { total: 1, pending: 0, failed: 0 },
+  }, '<testsuites tests="1" failures="0" errors="0" skipped="1"/>\n', /skipped request/);
 });

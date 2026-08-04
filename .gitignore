@@ -3,6 +3,7 @@ node_modules/
 dist/
 .contract-reports/
 .contract-inputs/
+.contract-handoff/
 .pact/
 .pacts/
 .postman-cli/

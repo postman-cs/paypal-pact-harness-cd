@@ -17,7 +17,7 @@ test('the complete Broker proof uses customer-supplied neutral infrastructure co
 
   assert.equal(variables.CONTAINER_REGISTRY_CONNECTOR, '<+input>');
   assert.equal(variables.KUBERNETES_CONNECTOR, '<+input>');
-  assert.equal(variables.KUBERNETES_NAMESPACE, '<+input>.default(paypal-contract-lower)');
+  assert.equal(variables.KUBERNETES_NAMESPACE, '<+input>');
 
   for (const { step } of pipeline.stages[0].stage.spec.execution.steps) {
     assert.equal(

@@ -27,7 +27,7 @@ pipeline:
       value: <+input>
     - name: KUBERNETES_NAMESPACE
       type: String
-      value: <+input>.default(paypal-contract-lower)
+      value: <+input>
     - name: BROKER_BASE_URL
       type: String
       value: <+input>
