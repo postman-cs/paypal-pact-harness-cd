@@ -106,6 +106,10 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
   const source = readFileSync(join(ROOT, 'harness', 'contract-gate.broker.pipeline.yaml'), 'utf8');
   const pipeline = YAML.parse(source).pipeline;
   const variables = Object.fromEntries(pipeline.variables.map((variable) => [variable.name, variable]));
+  const steps = Object.fromEntries(pipeline.stages[0].stage.spec.execution.steps
+    .map(({ step }) => [step.identifier, step]));
+  const fullNodeImage = 'node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4';
+  const slimNodeImage = 'node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7';
   assert.equal(pipeline.stages[0].stage.name, 'Consumer first Broker');
   const postman = source.indexOf('identifier: postman_static_preflight');
   const existing = source.indexOf('identifier: existing_postman_provider_gate');
@@ -132,8 +136,15 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
     'every Pact CLI Broker step must explicitly use the Debian CA bundle');
   assert.equal((source.match(/test -r "\$SSL_CERT_FILE"/g) ?? []).length, 3,
     'every Pact CLI Broker step must fail closed when its CA bundle is unavailable');
-  assert.equal((source.match(/image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4/g) ?? []).length, 4,
-    'source attestation and all three TLS Broker steps must use the pinned full Node image');
+  for (const identifier of [
+    'source_attestation',
+    'publish_seeded_consumer_pact',
+    'official_provider_verification',
+    'broker_can_i_deploy_lower',
+  ]) assert.equal(steps[identifier].spec.image, fullNodeImage, `${identifier} must include Git or the CA bundle`);
+  for (const identifier of ['postman_static_preflight', 'existing_postman_provider_gate']) {
+    assert.equal(steps[identifier].spec.image, slimNodeImage, `${identifier} should retain the smaller pinned image`);
+  }
   assert.doesNotMatch(source, /<\+codebase\.branch>/,
     'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
 });
