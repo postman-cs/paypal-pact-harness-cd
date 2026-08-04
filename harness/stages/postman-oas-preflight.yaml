@@ -9,6 +9,18 @@ stage:
   identifier: postman_dual_oas_preflight
   type: CI
   variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>.default(main)
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
     - name: consumer_workspace_id
       type: String
       required: true
@@ -36,7 +48,7 @@ stage:
     - name: contract_policy_path
       type: String
       required: true
-      value: <+input>.default(config/contract-policy.json)
+      value: <+input>.default(.pact-harness-source/config/contract-policy.json)
   spec:
     cloneCodebase: true
     platform:
@@ -44,6 +56,39 @@ stage:
       arch: Amd64
     execution:
       steps:
+        - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: branch
+                spec:
+                  branch: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
+            type: Run
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
+              command: |
+                set -eu
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
         - step:
             type: Run
             name: Pull and compare both Postman OAS contracts
@@ -67,7 +112,7 @@ stage:
                 REPORTS=.contract-reports/postman-oas
                 mkdir -p "$INPUTS" "$REPORTS"
 
-                node tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
+                node .pact-harness-source/tools/pact-harness/scripts/postman/pull-workspace-oas.mjs \
                   --consumer-workspace-id "$CONSUMER_WORKSPACE_ID" \
                   --consumer-spec-id "$CONSUMER_SPEC_ID" \
                   --provider-workspace-id "$PROVIDER_WORKSPACE_ID" \
@@ -76,13 +121,13 @@ stage:
                 cp "$INPUTS/postman-oas-provenance.json" \
                   "$REPORTS/postman-oas-provenance.json"
 
-                node tools/pact-harness/pact-harness.mjs oas-to-pact \
+                node .pact-harness-source/tools/pact-harness/pact-harness.mjs oas-to-pact \
                   --oas "$INPUTS/consumer-oas.yaml" \
                   --provider "$PROVIDER_NAME" \
                   --consumer "$CONSUMER_NAME" \
                   --out "$INPUTS/consumer-oas.pact.json"
 
-                node tools/pact-harness/pact-harness.mjs bdc-verify \
+                node .pact-harness-source/tools/pact-harness/pact-harness.mjs bdc-verify \
                   --oas "$INPUTS/provider-oas.yaml" \
                   --pact "$INPUTS/consumer-oas.pact.json" \
                   --policy "$CONTRACT_POLICY_PATH" \

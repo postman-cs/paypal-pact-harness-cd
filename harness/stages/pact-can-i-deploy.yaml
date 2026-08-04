@@ -5,6 +5,18 @@ stage:
   identifier: pact_can_i_deploy
   type: CI
   variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>.default(main)
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
     - name: broker_base_url
       type: String
       required: true
@@ -29,6 +41,39 @@ stage:
     execution:
       steps:
         - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: branch
+                spec:
+                  branch: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
+            type: Run
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
+            spec:
+              connectorRef: <+input>
+              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              shell: Sh
+              envVariables:
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
+              command: |
+                set -eu
+                node .pact-harness-source/scripts/ci/attest-harness-source.mjs \
+                  --workspace .pact-harness-source \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT" \
+                  --output ../.contract-reports/source-attestation.json
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: "0.25"
+        - step:
             type: Run
             name: Fail closed on the broker deployment matrix
             identifier: broker_can_i_deploy
@@ -47,8 +92,8 @@ stage:
                 set -eu
                 REPORTS=.contract-reports/pact-deploy
                 mkdir -p "$REPORTS"
-                node tools/pact-harness/scripts/install-pact-cli.mjs \
-                  --lock tools/pact-harness/pact-cli.lock.json \
+                node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
+                  --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
                   --output .pact/bin/pact
 
                 set +e

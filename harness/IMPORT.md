@@ -45,8 +45,8 @@ replaced by consumer-repository executable Pact output in production.
 
 ## Source checkout and portable CLI trust boundary
 
-Harness performs the Git checkout; the portable CLI does not clone its own source.
-Every complete pipeline in this repository fixes `repoName` to
+Harness performs every Git checkout; the portable CLI never authenticates to or
+clones Git by itself. Every complete pipeline in this repository fixes `repoName` to
 `paypal-pact-harness-cd`, enables Harness `cloneCodebase`, and runs
 `scripts/ci/attest-harness-source.mjs` before any provider, Postman, Pact, or
 deployment decision step. The attestation fails closed unless all of these are true:
@@ -63,6 +63,26 @@ API access enabled for webhook triggers. Bind the pipeline's remaining
 `connectorRef: <+input>` to that connector in a Harness Input Set or trigger.
 An account-scoped connector is also supported because `repoName` is fixed and the
 attestation independently verifies the full owner/repository identity.
+
+Every runtime stage under `harness/stages/` except the explicitly offline
+`consumer-contract-gate.vendored.yaml` uses that connector as an additional native
+`GitClone` step. It clones only
+`postman-cs/paypal-pact-harness-cd` to `.pact-harness-source`, while the PayPal
+application repo remains the pipeline codebase. Bind these three stage inputs:
+
+- `harness_source_connector`: the read-only Postman-CS GitHub connector;
+- `harness_source_ref`: `main` after merge, or the approved protected release branch;
+- `harness_source_commit`: the exact full 40-character commit SHA expected at that ref.
+
+For these additional-clone steps, use an account-level GitHub connector whose
+credential is fine-grained to read only this repository; the fixed full
+`repoName: postman-cs/paypal-pact-harness-cd` removes repository selection from
+the runtime form. A repository-scoped connector may be used only after the
+Harness editor confirms the fixed `repoName` is accepted for that connector type.
+
+The second step attests the additional checkout before any Postman, Pact, provider,
+or deployment decision executes. A moved branch fails closed until the reviewed
+input set is updated to the new full commit.
 
 ## A. PayPal TPE drop-in stage
 
@@ -93,11 +113,11 @@ the shared team workspace by running
 `tools/pact-harness/scripts/postman/sync-cloud-collection.mjs` with the target
 workspace ID, then replace `POSTMAN_COLLECTION_ID`.
 
-### Customer-owned primary checkout
+### Offline mirror exception
 
-The stage above deliberately attests that the primary checkout is this
-Postman-CS repository. For an application pipeline whose primary checkout must
-remain the PayPal repository, vendor the pinned bundle and import
+The normal stage keeps the PayPal application repository as primary and pulls
+this Postman-CS repo as a second, connector-authenticated checkout. Only when the
+runtime cannot read Postman-CS should PayPal vendor the pinned bundle and import
 `stages/consumer-contract-gate.vendored.yaml`. The full install, lock,
 cross-platform byte-preservation, local proof, and update process are in
 [`../docs/DOWNSTREAM-ADOPTION.md`](../docs/DOWNSTREAM-ADOPTION.md).

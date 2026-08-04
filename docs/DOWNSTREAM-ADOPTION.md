@@ -1,10 +1,12 @@
 # PayPal TPE downstream adoption
 
-This is the supported model when the primary Harness checkout must remain a
-PayPal-owned consumer, provider, or deployment repository. It is different from
-the dedicated toolkit pipelines in `harness/`, whose primary checkout is this
-Postman-CS repository and whose source attestation intentionally rejects any
-other Git origin.
+This is the offline-mirror model for a PayPal environment that cannot read the
+Postman-CS repository at runtime. The preferred drop-in model is now the modular
+stage set under `harness/stages/`: it preserves the PayPal-owned primary checkout,
+uses Harness's native `GitClone` step for the additional
+`postman-cs/paypal-pact-harness-cd` checkout, and attests its full commit before
+work. Use the vendored flow below only when that connector-based read is not
+available.
 
 ## 1. Acquire an immutable toolkit revision
 

@@ -25,11 +25,13 @@ To adapt it, edit the single secret-free
 five-minute handoff and live-service environment variables, see
 [`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md).
 
-To keep a PayPal application repository as the primary pipeline checkout, use
-the pinned vendoring and customer-owned Harness flow in
-[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md). Do not paste the
-toolkit-primary stage unchanged into an application repository: its strict source
-attestation intentionally accepts only this Postman-CS repository.
+The modular files in `harness/stages/` keep a PayPal application repository as
+the primary pipeline checkout. Their first two steps use Harness's native
+`GitClone` step to pull `postman-cs/paypal-pact-harness-cd` into
+`.pact-harness-source`, then fail closed unless its full commit matches the
+runtime input. The vendored flow in
+[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md) is retained only for
+environments that cannot read the Postman-CS repository at runtime.
 
 **Consumer engine source of truth.** This repo carries the engine source
 (`src/`), the tests (`test/`), the build (`scripts/build-bundle.mjs` → `tools/pact-harness`),
@@ -40,10 +42,11 @@ detection vendor the exact comparator from the production
 repository at the full commit and SHA-256 recorded in `postman-cs.lock.json`. CI
 verifies that digest before executing it, with no runtime network dependency.
 
-In Harness, `cloneCodebase: true` performs the Git checkout through the configured
-GitHub connector. Before any contract work, the pipeline verifies that the checkout
-is exactly `postman-cs/paypal-pact-harness-cd` at `<+codebase.commitSha>` and that
-the committed portable CLI plus its locked Postman-CS comparator are intact. See
+In the complete Harness pipelines, `cloneCodebase: true` checks out this repo as
+the primary codebase. In the drop-in stages, a native additional-repository
+`GitClone` step pulls the same repo without replacing PayPal's primary checkout.
+Both paths attest the exact origin, full commit, portable CLI, and locked
+Postman-CS comparator before contract work. See
 [`harness/IMPORT.md`](harness/IMPORT.md#source-checkout-and-portable-cli-trust-boundary).
 
 ## Optional ledger demo
@@ -76,7 +79,8 @@ closed, uploads JUnit/JSON plus the packaged CLI, and publishes an immutable ima
 See [`harness/IMPORT.md`](harness/IMPORT.md):
 
 - `harness/stages/consumer-contract-gate.yaml` — drop-in KubernetesDirect stage for an
-  existing PayPal pipeline; the first run is locked to the `lower` environment.
+  existing PayPal pipeline; it pulls this Postman-CS repo as an additional checkout
+  and the first run is locked to the `lower` environment.
 - `harness/contract-gate.lower.pipeline.yaml` — complete lower-environment Kubernetes
   import template with the Spring app as an ephemeral Background step.
 - `harness/contract-gate.self-test.pipeline.yaml` — zero-secret Harness Cloud proof, usable

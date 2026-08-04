@@ -9,6 +9,18 @@ stage:
   identifier: consumer_contract_gate
   type: CI
   variables:
+    - name: harness_source_connector
+      type: String
+      required: true
+      value: <+input>
+    - name: harness_source_ref
+      type: String
+      required: true
+      value: <+input>.default(main)
+    - name: harness_source_commit
+      type: String
+      required: true
+      value: <+input>
     - name: config_path
       type: String
       required: true
@@ -36,18 +48,33 @@ stage:
     execution:
       steps:
         - step:
+            type: GitClone
+            name: Pull the Postman-CS Pact Harness
+            identifier: pull_postman_cs_pact_harness
+            spec:
+              connectorRef: <+stage.variables.harness_source_connector>
+              repoName: postman-cs/paypal-pact-harness-cd
+              build:
+                type: branch
+                spec:
+                  branch: <+stage.variables.harness_source_ref>
+              cloneDirectory: .pact-harness-source
+              depth: 1
+        - step:
             type: Run
-            name: Attest Postman-CS source and portable CLI
-            identifier: source_attestation
+            name: Attest the Postman-CS Pact Harness
+            identifier: attest_postman_cs_pact_harness
             spec:
               connectorRef: <+input>
               image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
               shell: Sh
               envVariables:
-                EXPECTED_SOURCE_COMMIT: <+codebase.commitSha>
+                EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
               command: |
                 set -eu
-                node scripts/ci/attest-harness-source.mjs
+                cd .pact-harness-source
+                node scripts/ci/attest-harness-source.mjs \
+                  --expected-commit "$EXPECTED_SOURCE_COMMIT"
               resources:
                 limits:
                   memory: 500Mi
@@ -67,6 +94,7 @@ stage:
                 INVENTORY_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
+                cd .pact-harness-source
                 node paypal-contract-gate.mjs verify \
                   --config "$CONFIG_PATH" \
                   --clean
@@ -74,12 +102,12 @@ stage:
                 type: JUnit
                 spec:
                   paths:
-                    - .contract-reports/contract-gate-summary.xml
-                    - .contract-reports/oas-audit.xml
-                    - .contract-reports/oas-diff.xml
-                    - .contract-reports/consumer-bdc.xml
-                    - .contract-reports/route-contract.xml
-                    - .contract-reports/generated-openapi-route-contract.xml
+                    - .pact-harness-source/.contract-reports/contract-gate-summary.xml
+                    - .pact-harness-source/.contract-reports/oas-audit.xml
+                    - .pact-harness-source/.contract-reports/oas-diff.xml
+                    - .pact-harness-source/.contract-reports/consumer-bdc.xml
+                    - .pact-harness-source/.contract-reports/route-contract.xml
+                    - .pact-harness-source/.contract-reports/generated-openapi-route-contract.xml
               resources:
                 limits:
                   memory: 500Mi
@@ -99,6 +127,7 @@ stage:
                 CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
               command: |
                 set -eu
+                cd .pact-harness-source
                 export HOME="$PWD/.ci-home"
                 mkdir -p "$HOME"
                 npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
@@ -116,7 +145,7 @@ stage:
                 type: JUnit
                 spec:
                   paths:
-                    - .contract-reports/postman/postman-run.xml
+                    - .pact-harness-source/.contract-reports/postman/postman-run.xml
               resources:
                 limits:
                   memory: 500Mi
@@ -131,6 +160,7 @@ stage:
               shell: Sh
               command: |
                 set -eu
+                cd .pact-harness-source
                 node --input-type=module <<'NODE'
                 import { createHash } from 'node:crypto';
                 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

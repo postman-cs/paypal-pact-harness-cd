@@ -102,6 +102,53 @@ test('complete Harness pipelines pin the repo name and attest origin, commit, an
     }
   }
 
-  const dropIn = YAML.parse(readFileSync(join(HARNESS, 'stages', 'consumer-contract-gate.yaml'), 'utf8'));
-  assert.equal(dropIn.stage.spec.execution.steps[0].step.identifier, 'source_attestation');
+});
+
+test('runtime drop-in stages pull and attest only postman-cs/paypal-pact-harness-cd before contract work', () => {
+  const remoteStages = [
+    'consumer-contract-gate.yaml',
+    'pact-can-i-deploy.yaml',
+    'pact-consumer-publish.yaml',
+    'pact-provider-verify.yaml',
+    'pact-record-deployment.yaml',
+    'postman-oas-preflight.yaml',
+  ];
+
+  for (const name of remoteStages) {
+    const file = join(HARNESS, 'stages', name);
+    const source = readFileSync(file, 'utf8');
+    const stage = YAML.parse(source).stage;
+    const variables = Object.fromEntries(stage.variables.map((variable) => [variable.name, variable]));
+    assert.equal(variables.harness_source_connector.value, '<+input>', `${name}: connector must remain a runtime input`);
+    assert.equal(variables.harness_source_ref.value, '<+input>.default(main)', `${name}: source ref must default to main`);
+    assert.equal(variables.harness_source_commit.value, '<+input>', `${name}: full source commit must be supplied`);
+
+    const [cloneEntry, attestEntry, ...workEntries] = stage.spec.execution.steps;
+    const clone = cloneEntry.step;
+    assert.equal(clone.type, 'GitClone', `${name}: source checkout must be a native Harness GitClone step`);
+    assert.equal(clone.identifier, 'pull_postman_cs_pact_harness');
+    assert.equal(clone.spec.connectorRef, '<+stage.variables.harness_source_connector>');
+    assert.equal(clone.spec.repoName, 'postman-cs/paypal-pact-harness-cd');
+    assert.equal(clone.spec.build.type, 'branch');
+    assert.equal(clone.spec.build.spec.branch, '<+stage.variables.harness_source_ref>');
+    assert.equal(clone.spec.cloneDirectory, '.pact-harness-source');
+    assert.equal(clone.spec.depth, 1);
+
+    const attestation = attestEntry.step;
+    assert.equal(attestation.type, 'Run');
+    assert.equal(attestation.identifier, 'attest_postman_cs_pact_harness');
+    assert.equal(attestation.spec.envVariables.EXPECTED_SOURCE_COMMIT, '<+stage.variables.harness_source_commit>');
+    assert.match(attestation.spec.command,
+      /(?:cd \.pact-harness-source[\s\S]*node scripts|node \.pact-harness-source\/scripts)\/ci\/attest-harness-source\.mjs/);
+    assert.match(attestation.spec.command, /--expected-commit "\$EXPECTED_SOURCE_COMMIT"/);
+
+    assert.ok(workEntries.length > 0, `${name}: contract work must follow source attestation`);
+    assert.doesNotMatch(source, /repoName:\s+(?!postman-cs\/paypal-pact-harness-cd)[^\s]+/,
+      `${name}: no alternate runtime source repository is allowed`);
+
+    if (name === 'postman-oas-preflight.yaml') {
+      assert.equal(variables.contract_policy_path.value,
+        '<+input>.default(.pact-harness-source/config/contract-policy.json)');
+    }
+  }
 });
