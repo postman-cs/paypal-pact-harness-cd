@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  canonicalCollectionContent,
   canonicalCollectionSha256,
+  executableCollectionContent,
 } from '../scripts/postman/collection-canonical.mjs';
 import { runLowerCollection } from '../scripts/postman/run-lower-collection.mjs';
 
@@ -99,8 +99,10 @@ test('cloud lower run proves workspace and digest, then executes a sealed local 
   assert.notEqual(run.args[2], 'user-orders');
 
   const snapshot = readFileSync(result.snapshotPath, 'utf8');
-  assert.equal(createHash('sha256').update(snapshot).digest('hex'), expected);
-  assert.equal(snapshot, canonicalCollectionContent(collection()));
+  assert.equal(createHash('sha256').update(snapshot).digest('hex'), result.collection.snapshotSha256);
+  assert.equal(canonicalCollectionSha256(JSON.parse(snapshot)), expected);
+  assert.equal(snapshot, executableCollectionContent(collection()));
+  assert.equal(JSON.parse(snapshot).item[0].request.url, '{{baseUrl}}/orders/1');
   assert.doesNotMatch(snapshot, /server-managed/);
   assertOwnerOnlyWhenPosix(result.snapshotPath);
   const provenance = JSON.parse(readFileSync(result.provenancePath, 'utf8'));

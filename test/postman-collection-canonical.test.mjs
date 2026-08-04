@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canonicalCollectionSha256,
+  executableCollectionContent,
 } from '../scripts/postman/collection-canonical.mjs';
 
 function localCollection() {
@@ -69,4 +70,17 @@ test('collection digest normalizes Postman URL strings and script defaults', () 
   retrieved.item[0].response = [];
 
   assert.equal(canonicalCollectionSha256(retrieved), canonicalCollectionSha256(local));
+});
+
+test('sealed executable content preserves the canonical digest and runnable templated URL', () => {
+  const source = {
+    info: { name: 'Orders' },
+    item: [{
+      name: 'Get order',
+      request: { method: 'GET', url: { raw: '{{baseUrl}}/v2/orders/1' } },
+    }],
+  };
+  const executable = JSON.parse(executableCollectionContent(source));
+  assert.equal(executable.item[0].request.url, '{{baseUrl}}/v2/orders/1');
+  assert.equal(canonicalCollectionSha256(executable), canonicalCollectionSha256(source));
 });

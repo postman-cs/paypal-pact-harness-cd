@@ -199,7 +199,13 @@ test('GitHub Spring proof installs the harness runtime before invoking source mo
   const workflow = YAML.parse(source);
   const steps = workflow.jobs['spring-lower-environment'].steps;
   const install = steps.findIndex((step) => step.run === 'npm ci');
-  const exercise = steps.findIndex((step) => step.name === 'Exercise positive and negative cases with Postman CLI');
   assert.ok(install >= 0, 'Spring proof must install the locked yaml runtime dependency');
-  assert.ok(exercise > install, 'dependency installation must precede source-module execution');
+  const sourceInvocations = steps
+    .map((step, index) => ({ index, run: step.run ?? '' }))
+    .filter((step) => /node (scripts|src)\//.test(step.run));
+  assert.ok(sourceInvocations.length > 0, 'Spring proof must exercise source modules');
+  assert.ok(
+    sourceInvocations.every((step) => step.index > install),
+    'dependency installation must precede every source-module invocation',
+  );
 });

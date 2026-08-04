@@ -16,7 +16,10 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { canonicalCollectionContent } from './collection-canonical.mjs';
+import {
+  canonicalCollectionSha256,
+  executableCollectionContent,
+} from './collection-canonical.mjs';
 import { postmanApiUrl, redactPostmanSecrets, validatePostmanApiBase } from './postman-api-base.mjs';
 import { requestPostmanJson } from './pull-workspace-oas.mjs';
 
@@ -256,14 +259,15 @@ export async function runLowerCollection({
   }
 
   const requests = validateCollection(document);
-  const snapshot = canonicalCollectionContent(document);
+  const snapshot = executableCollectionContent(document);
   if (snapshot.includes(apiKey ?? '') && apiKey) {
     throw new Error('collection snapshot contains the Postman API credential');
   }
   if (snapshot.includes(demoToken)) {
     throw new Error('collection snapshot contains the runtime bearer credential');
   }
-  const actualSha256 = digest(snapshot);
+  const actualSha256 = canonicalCollectionSha256(document);
+  const snapshotSha256 = digest(snapshot);
   if (expectedSha256 && actualSha256 !== expectedSha256) {
     throw new Error(
       `Postman collection canonical SHA-256 mismatch: expected ${expectedSha256}, received ${actualSha256}`,
@@ -281,8 +285,11 @@ export async function runLowerCollection({
   }
   atomicWrite(snapshotPath, snapshot);
   const sealedSnapshot = readFileSync(snapshotPath);
-  if (digest(sealedSnapshot) !== actualSha256) {
+  if (digest(sealedSnapshot) !== snapshotSha256) {
     throw new Error('Postman collection snapshot changed before execution');
+  }
+  if (canonicalCollectionSha256(JSON.parse(sealedSnapshot)) !== actualSha256) {
+    throw new Error('Postman collection snapshot is not canonically equivalent to the approved source');
   }
 
   const provenance = {
@@ -294,6 +301,7 @@ export async function runLowerCollection({
       requests,
       expectedSha256: expectedSha256 || null,
       canonicalSha256: actualSha256,
+      snapshotSha256,
       bytes: sealedSnapshot.length,
       snapshot: snapshotPath,
     },

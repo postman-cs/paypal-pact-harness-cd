@@ -72,6 +72,30 @@ export function canonicalCollectionContent(collection) {
   return `${JSON.stringify(canonicalCollection(collection), null, 2)}\n`;
 }
 
+function executable(value, parentKey = '') {
+  if (Array.isArray(value)) return value.map((entry) => executable(entry));
+  if (!value || typeof value !== 'object') return value;
+
+  if (
+    parentKey === 'url' &&
+    typeof value.raw === 'string' &&
+    Object.keys(value).length === 1
+  ) {
+    return value.raw;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, executable(entry, key)]),
+  );
+}
+
+// Canonical URL rendering is intentionally representation-independent for
+// digest comparison. Postman CLI 1.45 cannot execute a URL object containing
+// only `raw`, so the sealed run copy uses the equivalent valid string form.
+export function executableCollectionContent(collection) {
+  return `${JSON.stringify(executable(canonicalCollection(collection)), null, 2)}\n`;
+}
+
 export function canonicalCollectionSha256(collection) {
   return createHash('sha256').update(canonicalCollectionContent(collection)).digest('hex');
 }
