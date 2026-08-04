@@ -4,21 +4,45 @@ Postman-first contract testing for PayPal: an install-free static BDC and provid
 conformance gate, plus importable Harness stages for the complete open-source Pact
 consumer/provider lifecycle.
 
+This is a public source repository. The checked-in simulation binding is demonstration
+data. Customer-configured archives, real customer Harness/Postman bindings, and Broker
+coordinates are not published here and must be delivered through an approved private
+channel.
+
+| Customer handoff | Link |
+| --- | --- |
+| Immutable source release | [`v0.6.4`](https://github.com/postman-cs/paypal-pact-harness-cd/releases/tag/v0.6.4) |
+| Build and validation record | [`BUILD-LOG.md`](BUILD-LOG.md) |
+| Five-minute local proof | [`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md) |
+| Harness import instructions | [`harness/IMPORT.md`](harness/IMPORT.md) |
+| Production Pact lifecycle | [`docs/PACT-BROKER-RUNBOOK.md`](docs/PACT-BROKER-RUNBOOK.md) |
+| Customer package and private delivery | [`docs/CUSTOMER-HANDOFF-KIT.md`](docs/CUSTOMER-HANDOFF-KIT.md) |
+
 ## PayPal TPE: start here
 
 Requirements: Git and Node 20 or newer.
 
+| Goal | Path |
+| --- | --- |
+| Prove the toolkit locally | Run the install-free `doctor` and `verify --clean` commands below. |
+| Run the supplied Orders demonstration in Harness | Import the confidential kit's customer-scoped pipeline and Input Set. |
+| Adopt production CDC | Add the five modular Pact stages to the consumer, provider, and deployment pipelines that own each event. |
+
 ```bash
-git clone https://github.com/postman-cs/paypal-pact-harness-cd.git
+git clone --branch v0.6.4 --single-branch \
+  https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
+test "$(git rev-parse HEAD)" = 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
 node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
 
 No `npm install`, Docker, Pact Broker, or dedicated host is needed for the phase-0 proof.
-The first command checks the machine, profile, files, and locked Postman-CS
+The first Node command checks the machine, profile, files, and locked Postman-CS
 dependency. The second runs the complete lower-environment gate and writes JUnit,
 JSON, and checksums under `.contract-reports/`.
+
+### Postman delivery preparation
 
 For the complete Harness proof, one credential-free customer config now carries
 the Harness bindings and customer-owned Postman asset lock. It can generate either
@@ -42,6 +66,13 @@ credential values, but they are customer-confidential operational metadata.
 Configured kits are never public release or public CI artifacts; deliver the
 archive, checksum, and DELIVERY guide together through PayPal's approved
 access-controlled channel.
+
+Harness execution additionally requires customer-owned Git, registry, and
+delegate-backed Kubernetes connectors; a stable HTTPS OSS Pact Broker; the approved
+Postman workspaces, two OAS documents, and provider Collection; the documented
+secret references; and egress to those dependencies. Production CDC also requires
+real consumer Pact tests, deterministic provider states, the exact provider build,
+the real deployment, and target-environment Postman smoke tests.
 
 See [`CUSTOMER-HANDOFF-KIT.md`](docs/CUSTOMER-HANDOFF-KIT.md) for the exact contents,
 verification model, and delivery workflow.
@@ -165,6 +196,7 @@ text reporter artifacts are credential-redacted and re-sealed before publication
 | `tools/pact-harness/` | the committed, install-free CLI bundle (what the pipelines call) |
 | `paypal-contract-gate.mjs`, `paypal-contract-gate.config.json` | TPE-friendly entry point and single versioned profile |
 | `PAYPAL-TPE-QUICKSTART.md` | clone-to-green handoff and live lower-service setup |
+| `BUILD-LOG.md` | release, GitHub, Postman, Harness, security, and reproducibility record |
 | `config/paypal-tpe-handoff.example.json`, `scripts/tpe/prepare-handoff.mjs` | one-file, credential-free Harness and Postman binding generator |
 | `scripts/tpe/package-customer-kit.mjs` | versioned customer kit with demo/production separation, verifier, SBOM, and archive |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |

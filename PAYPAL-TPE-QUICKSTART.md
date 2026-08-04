@@ -6,8 +6,10 @@ not need `npm install`, Docker, a Pact Broker, or a dedicated host.
 ## 1. Clone and prove the supplied lower profile
 
 ```bash
-git clone https://github.com/postman-cs/paypal-pact-harness-cd.git
+git clone --branch v0.6.4 --single-branch \
+  https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
+test "$(git rev-parse HEAD)" = 6c2bd1c7c37bdfdcaf1fda12a8b9b7d92649ef97
 node paypal-contract-gate.mjs doctor
 node paypal-contract-gate.mjs verify --clean
 ```
