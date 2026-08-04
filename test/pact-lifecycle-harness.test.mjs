@@ -132,6 +132,8 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
     'every Pact CLI Broker step must explicitly use the Debian CA bundle');
   assert.equal((source.match(/test -r "\$SSL_CERT_FILE"/g) ?? []).length, 3,
     'every Pact CLI Broker step must fail closed when its CA bundle is unavailable');
+  assert.equal((source.match(/image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4/g) ?? []).length, 4,
+    'source attestation and all three TLS Broker steps must use the pinned full Node image');
   assert.doesNotMatch(source, /<\+codebase\.branch>/,
     'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
 });

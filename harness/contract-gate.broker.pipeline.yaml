@@ -114,7 +114,7 @@ pipeline:
                   identifier: postman_static_preflight
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
                       POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
@@ -160,7 +160,7 @@ pipeline:
                   identifier: existing_postman_provider_gate
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
                       PAYPAL_CONTRACT_ACTUATOR_URL: http://127.0.0.1:8080/actuator/mappings
@@ -191,7 +191,7 @@ pipeline:
                   identifier: publish_seeded_consumer_pact
                   spec:
                     connectorRef: <+input>
-                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
                       PACT_BROKER_BASE_URL: <+pipeline.variables.BROKER_BASE_URL>
