@@ -106,6 +106,8 @@ test('complete Harness pipelines pin the repo name and attest origin, commit, an
         ? '<+pipeline.variables.REVIEWED_SOURCE_COMMIT>'
         : '<+codebase.commitSha>';
       assert.equal(first.spec.envVariables.EXPECTED_SOURCE_COMMIT, expectedCommit);
+      assert.doesNotMatch(first.spec.image, /-slim@/,
+        `${name}: source attestation must use a pinned Node image that includes Git`);
       assert.match(first.spec.command, /attest-harness-source\.mjs/);
     }
   }
