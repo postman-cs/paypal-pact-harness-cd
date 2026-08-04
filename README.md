@@ -20,21 +20,30 @@ The first command checks the machine, profile, files, and locked Postman-CS
 dependency. The second runs the complete lower-environment gate and writes JUnit,
 JSON, and checksums under `.contract-reports/`.
 
-For the complete Harness proof, one secret-free customer config now generates the
-entire 18-variable Input Set and its import checklist:
+For the complete Harness proof, one credential-free customer config now carries
+the Harness bindings and customer-owned Postman asset lock. It can generate either
+the 18-variable Input Set or a complete versioned customer kit:
 
 ```bash
 mkdir -p .contract-handoff
 cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
-# Replace the customer connector, namespace, and HTTPS Broker placeholders.
+# Replace every Harness, connector, namespace, Broker, and Postman placeholder.
 npm run handoff:doctor
 npm run handoff:prepare
+npm run customer:package
 ```
 
-These commands also need no `npm install`. Generated customer bindings remain in
-the ignored `.contract-handoff/` directory; Harness secrets never enter the file.
+These commands also need no `npm install`. The customer package contains a concise
+start guide, local proof, import-ready pipeline and Input Set, production stages,
+full-file checksums, a self-verifier, release provenance, third-party notices, and
+a CycloneDX SBOM. Cloud-mutating Postman provisioning tools are excluded. Generated
+bindings remain in the ignored `.contract-handoff/` directory and contain no
+credential values, but they are customer-confidential operational metadata.
 
-To adapt it, edit the single secret-free
+See [`CUSTOMER-HANDOFF-KIT.md`](docs/CUSTOMER-HANDOFF-KIT.md) for the exact contents,
+verification model, and delivery workflow.
+
+To adapt it, edit the single credential-free
 [`paypal-contract-gate.config.json`](paypal-contract-gate.config.json). For the
 five-minute handoff and live-service environment variables, see
 [`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md).
@@ -153,7 +162,8 @@ text reporter artifacts are credential-redacted and re-sealed before publication
 | `tools/pact-harness/` | the committed, install-free CLI bundle (what the pipelines call) |
 | `paypal-contract-gate.mjs`, `paypal-contract-gate.config.json` | TPE-friendly entry point and single versioned profile |
 | `PAYPAL-TPE-QUICKSTART.md` | clone-to-green handoff and live lower-service setup |
-| `config/paypal-tpe-handoff.example.json`, `scripts/tpe/prepare-handoff.mjs` | one-file, secret-free Harness Input Set generator |
+| `config/paypal-tpe-handoff.example.json`, `scripts/tpe/prepare-handoff.mjs` | one-file, credential-free Harness and Postman binding generator |
+| `scripts/tpe/package-customer-kit.mjs` | versioned customer kit with demo/production separation, verifier, SBOM, and archive |
 | `action.yml`, `.github/workflows/` | modular GitHub action and executable end-to-end proof |
 | `demo/orders-spring/`, `k8s/` | Orders Spring Boot wrapper and optional standalone lower deployment |
 | `config/` | subset selectors, contract policy, governed exceptions, and app/spec graph |

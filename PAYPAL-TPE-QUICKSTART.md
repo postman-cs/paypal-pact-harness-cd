@@ -100,17 +100,23 @@ from one customer-owned file:
 ```bash
 mkdir -p .contract-handoff
 cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
-# Edit only the connector, Kubernetes namespace, and HTTPS Pact Broker placeholders.
+# Replace every Harness, connector, namespace, Broker, and Postman placeholder.
 npm run handoff:doctor
 npm run handoff:prepare
+npm run customer:package
 ```
 
 The generator proves the selected release tag still resolves to its reviewed full
-commit, covers all 18 pipeline variables, and writes a secret-free Input Set plus
-an exact import checklist under `.contract-handoff/`. In Harness, create the Input
-Set for `paypal_postman_pact_broker_lower`, open its YAML editor, and paste the
-generated `paypal_pact_broker_lower.input-set.yaml`. Confirm the three project
-secrets named in the generated checklist, then run the Input Set.
+commit and covers all 18 pipeline variables. `handoff:prepare` writes the minimal
+Input Set and checklist. `customer:package` additionally writes a versioned `.tgz`
+containing the import-ready demo, production stages, install-free local proof,
+full-file integrity manifest, verifier, notices, and SBOM. In Harness, import the
+pipeline and Input Set under the kit's `demo/` directory, confirm the three project
+secret identifiers, then execute the Input Set.
+
+The package contains no credential values, but connector names, Broker coordinates,
+namespaces, and Postman identities are customer-confidential operational metadata.
+Distribute it only through the approved customer channel.
 
 This proof uses the demo provider and seeded consumer Pact. It is not a substitute
 for consumer-generated contracts, a PayPal deployment, target-environment smoke

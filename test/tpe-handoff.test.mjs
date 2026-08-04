@@ -65,6 +65,17 @@ test('handoff renderer covers every Broker runtime variable from one secret-free
   for (const secret of SECRET_IDENTIFIERS) assert.doesNotMatch(source, new RegExp(secret));
 });
 
+test('handoff accepts one-file customer configuration with an inline Postman asset lock', () => {
+  const inline = config();
+  const binding = JSON.parse(readFileSync(join(ROOT, inline.postman.bindingFile), 'utf8'));
+  inline.postman = { binding };
+  const model = validateHandoffConfig(inline, { rootDir: ROOT });
+  assert.equal(model.bindingFile, null);
+  assert.equal(model.bindingSource, 'inline handoff config');
+  assert.equal(model.binding.provider.collection.uid, binding.provider.collection.uid);
+  assert.match(renderHarnessInputSet(model), /PROVIDER_COLLECTION_UID/);
+});
+
 test('handoff preparation is all-or-nothing unless replacement is explicit', () => {
   const output = join(ROOT, '.contract-handoff', `atomicity-${process.pid}-${Date.now()}`);
   mkdirSync(output, { recursive: true });
@@ -95,6 +106,12 @@ test('handoff renderer fails closed on placeholders, moved tags, and unsafe cust
   const badUrl = config();
   badUrl.broker.baseUrl = 'http://broker.example.test';
   assert.throws(() => validateHandoffConfig(badUrl, { rootDir: ROOT }), /HTTPS URL/);
+
+  const credential = config();
+  const unsafeBinding = JSON.parse(readFileSync(join(ROOT, credential.postman.bindingFile), 'utf8'));
+  unsafeBinding.apiKey = 'not-even-a-real-key';
+  credential.postman = { binding: unsafeBinding };
+  assert.throws(() => validateHandoffConfig(credential, { rootDir: ROOT }), /forbidden credential field/);
 
   const moved = validateHandoffConfig(config(), { rootDir: ROOT });
   moved.release.reviewedSourceCommit = '0'.repeat(40);

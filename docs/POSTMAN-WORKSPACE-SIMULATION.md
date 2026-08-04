@@ -40,8 +40,13 @@ compatibility paths against the live provider OAS:
 2. consumer Collection examples -> Pact-shaped contract -> static BDC verification
 
 Evidence is written under `.contract-reports/postman-workspace-simulation/`.
-The generated `config/postman-workspace-simulation.json` contains IDs, names,
-fixture paths, and digests; it never contains the Postman API key.
+The generated `config/postman-workspace-simulation.json` is an explicitly
+Postman-CS-hosted demonstration binding. It contains IDs, names, fixture paths,
+and digests; it never contains the Postman API key.
+
+Do not use those identities as a customer default. Customer handoffs start from
+`config/paypal-tpe-handoff.example.json`, whose inline Postman binding requires
+customer-owned workspace, Spec, Collection, and canonical-digest values.
 
 For Harness, map the generated IDs to `CONSUMER_WORKSPACE_ID`,
 `CONSUMER_SPEC_ID`, `PROVIDER_WORKSPACE_ID`, and `PROVIDER_SPEC_ID`. Use the

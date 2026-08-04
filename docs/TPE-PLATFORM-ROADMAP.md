@@ -7,8 +7,8 @@ the safe path repeatable across many teams without copying demo assumptions.
 
 - One repository supplies the install-free engine, complete Harness pipeline, and
   modular stages.
-- One secret-free JSON file generates all 18 runtime inputs, a Harness Input Set,
-  a release attestation, and an operator checklist.
+- One credential-free JSON file generates all 18 runtime inputs, a Harness Input
+  Set, a release attestation, an operator checklist, and a versioned customer kit.
 - `postman:seed-demo` is the explicitly mutating simulation provisioner;
   `postman:inspect` is the read-only drift and compatibility check.
 - Postman CLI evidence is accepted only when requests and assertions are non-empty,
