@@ -204,16 +204,21 @@ pipeline:
                       set -eu
                       mkdir -p .pact/bin .pacts .contract-reports/pact-consumer
                       cp fixtures/paypal/orders-consumer.pact.json .pacts/
+                      node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
-                      .pact/bin/pact broker publish .pacts \
-                        --consumer-app-version "$CONSUMER_APP_VERSION" \
-                        --branch "$CONSUMER_PACT_BRANCH" \
-                        --validate \
-                        --strict \
-                        --output json \
-                        > .contract-reports/pact-consumer/publish.json
+                      if ! .pact/bin/pact broker publish .pacts \
+                          --consumer-app-version "$CONSUMER_APP_VERSION" \
+                          --branch "$CONSUMER_PACT_BRANCH" \
+                          --validate \
+                          --strict \
+                          --output json \
+                          > .contract-reports/pact-consumer/publish.json 2>&1; then
+                        node -e 'const fs=require("node:fs");let text=fs.readFileSync(process.argv[1],"utf8");for(const name of ["PACT_BROKER_PASSWORD"]){const secret=process.env[name];if(secret)text=text.split(secret).join("[REDACTED]")}process.stderr.write(text)' \
+                          .contract-reports/pact-consumer/publish.json
+                        exit 1
+                      fi
                       cat .contract-reports/pact-consumer/publish.json
                     resources:
                       limits:
@@ -239,6 +244,7 @@ pipeline:
                       set -eu
                       REPORTS=.contract-reports/pact-provider
                       mkdir -p "$REPORTS"
+                      node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
@@ -286,6 +292,7 @@ pipeline:
                       set -eu
                       REPORTS=.contract-reports/pact-deploy
                       mkdir -p "$REPORTS"
+                      node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
