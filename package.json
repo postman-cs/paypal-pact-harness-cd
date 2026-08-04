@@ -14,6 +14,8 @@
     "package:bundle": "node scripts/package-bundle.mjs",
     "test:packed": "node scripts/test-packed-bundle.mjs",
     "test:adoption": "node scripts/simulate-downstream-adoption.mjs",
+    "postman:setup": "node scripts/postman/setup-workspace-simulation.mjs",
+    "postman:verify": "node scripts/postman/run-workspace-simulation.mjs",
     "test:all": "npm test && npm run check && npm run test:adoption && npm run build:bundle && npm run package:bundle && npm run test:packed",
     "doctor": "node paypal-contract-gate.mjs doctor",
     "verify:contract": "node paypal-contract-gate.mjs verify --clean",

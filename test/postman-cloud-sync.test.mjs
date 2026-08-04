@@ -27,6 +27,7 @@ test('Postman Cloud sync creates a missing collection in the selected workspace'
   assert.equal(result.action, 'created');
   assert.equal(result.uid, 'user-created');
   assert.match(calls[0].url, /workspace=workspace-1/);
+  assert.match(calls[0].url, /name=Orders/);
   assert.equal(calls[1].options.method, 'POST');
   assert.equal(JSON.parse(calls[1].options.body).collection.info.name, 'Orders lower');
 });

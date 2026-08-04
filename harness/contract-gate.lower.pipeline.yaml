@@ -17,7 +17,7 @@ pipeline:
   variables:
     - name: POSTMAN_COLLECTION_ID
       type: String
-      value: <+input>.default("51415493-51c906d4-99bf-4863-9168-f37d55f534b9")
+      value: <+input>
   stages:
     - stage:
         name: Contract - Consumer and route gate

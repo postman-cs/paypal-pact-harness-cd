@@ -36,7 +36,7 @@ function postmanFetch({ wrongConsumerWorkspace = false } = {}) {
       return jsonResponse({ workspaces: [{ id: workspaceId, name: 'Contracts' }] });
     }
     if (url.pathname === '/specs/consumer-spec/definitions') {
-      return jsonResponse(JSON.stringify(consumerOas));
+      return jsonResponse(consumerOas);
     }
     if (url.pathname === '/specs/provider-spec/definitions') {
       return jsonResponse(JSON.stringify(providerOas));

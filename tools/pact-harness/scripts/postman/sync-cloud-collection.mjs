@@ -52,8 +52,13 @@ export async function syncCloudCollection({
 
   const listUrl = new URL('/collections', apiBase);
   listUrl.searchParams.set('workspace', workspaceId);
+  listUrl.searchParams.set('name', collection.info.name);
   const listed = await requestJson(listUrl, { apiKey, fetchImpl, timeoutMs });
-  const existing = (listed.collections ?? []).find((entry) => entry.name === collection.info.name);
+  const matches = (listed.collections ?? []).filter((entry) => entry.name === collection.info.name);
+  if (matches.length > 1) {
+    throw new Error(`multiple collections named ${collection.info.name} in workspace ${workspaceId}`);
+  }
+  const existing = matches[0];
 
   const target = existing
     ? new URL(`/collections/${encodeURIComponent(existing.uid)}`, apiBase)

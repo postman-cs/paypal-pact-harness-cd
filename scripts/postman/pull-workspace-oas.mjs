@@ -103,7 +103,13 @@ async function assertSpecificationWorkspace({
 async function fetchSpecification({ role, workspaceId, specId, apiBase, request }) {
   await assertSpecificationWorkspace({ workspaceId, specId, apiBase, request });
   const body = await request(apiUrl(`/specs/${encodeURIComponent(specId)}/definitions`, apiBase));
-  const content = typeof body === 'string' ? body : body?.definition;
+  const content = typeof body === 'string'
+    ? body
+    : typeof body?.definition === 'string'
+      ? body.definition
+      : body && typeof body === 'object' && !Array.isArray(body) && (body.openapi || body.swagger)
+        ? JSON.stringify(body, null, 2)
+        : undefined;
   if (typeof content !== 'string' || !content.trim()) {
     throw new Error(`${role} specification definition response was empty or unsupported`);
   }
