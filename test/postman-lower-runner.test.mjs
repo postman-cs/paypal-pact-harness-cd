@@ -51,7 +51,7 @@ function successfulPostman(calls) {
     }));
     writeFileSync(
       args[args.indexOf('--reporter-junit-export') + 1],
-      '<testsuites tests="2" failures="0" errors="0" skipped="0"/>\n',
+      '<testsuites tests="1" failures="0" errors="0" skipped="0"/>\n',
     );
     return { status: 0, stdout: '1 request and 2 assertions passed\n', stderr: '' };
   };
@@ -108,6 +108,7 @@ test('cloud lower run proves workspace and digest, then executes a sealed local 
   assert.equal(result.execution.status, 'pass');
   assert.equal(result.execution.evidence.requests.total, 1);
   assert.equal(result.execution.evidence.assertions.total, 2);
+  assert.equal(result.execution.evidence.junit.tests, 1);
   assert.equal(spawnCalls.length, 2);
   for (const call of spawnCalls) {
     assert.equal(call.options.env.POSTMAN_API_KEY, undefined);

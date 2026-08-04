@@ -302,9 +302,12 @@ export function assertPostmanExecutionEvidence(jsonPath, junitPath) {
       `Postman JUnit reporter is not clean: failures=${junit.failures}, errors=${junit.errors}, skipped=${junit.skipped}`,
     );
   }
-  if (junit.tests !== assertions.total) {
+  // JUnit may group multiple Postman assertions from one request into one
+  // testcase. It must be non-empty and clean, but its request-level case count
+  // cannot be required to equal the JSON assertion count.
+  if (junit.tests > assertions.total) {
     throw new Error(
-      `Postman JSON and JUnit reporters disagree: assertions=${assertions.total}, JUnit tests=${junit.tests}`,
+      `Postman JSON and JUnit reporters disagree: assertions=${assertions.total}, JUnit cases=${junit.tests}`,
     );
   }
   return { reporterSchema, requests, assertions, junit };
