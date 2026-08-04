@@ -25,8 +25,8 @@ function config() {
       inputSetIdentifier: 'paypal_pact_broker_lower',
     },
     release: {
-      sourceRef: 'v0.6.0',
-      reviewedSourceCommit: '5c78b1e9aaa6da92db3c0683b71849a639155f21',
+      sourceRef: 'v0.6.1',
+      reviewedSourceCommit: 'b20b8c51f03a0fdca907025e02ee24f2b29d817c',
       consumerPactBranch: 'main',
       providerPactBranch: 'main',
     },
@@ -57,7 +57,7 @@ test('handoff renderer covers every Broker runtime variable from one secret-free
   assert.deepEqual(Object.keys(values), PIPELINE_VARIABLES);
   assert.deepEqual(PIPELINE_VARIABLES, expected);
   assert.equal(inputSet.pipeline.properties.ci.codebase.build.type, 'tag');
-  assert.equal(inputSet.pipeline.properties.ci.codebase.build.spec.tag, 'v0.6.0');
+  assert.equal(inputSet.pipeline.properties.ci.codebase.build.spec.tag, 'v0.6.1');
   assert.equal(values.CONSUMER_WORKSPACE_ID, 'd5576940-9307-447d-91df-70b5fbb33e03');
   assert.equal(values.PROVIDER_COLLECTION_UID, '55358385-070f346f-4c4b-4621-8871-908ceb21341d');
   assert.equal(values.REVIEWED_SOURCE_COMMIT, model.release.reviewedSourceCommit);
