@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "classification": "customer-owned Postman asset binding template",
+  "apiBase": "https://api.postman.com",
+  "consumer": {
+    "participant": "REPLACE_WITH_CONSUMER_PACTICIPANT",
+    "workspace": {
+      "id": "REPLACE_WITH_CONSUMER_WORKSPACE_ID",
+      "name": "REPLACE_WITH_CONSUMER_WORKSPACE_NAME"
+    },
+    "spec": {
+      "id": "REPLACE_WITH_CONSUMER_SPEC_ID",
+      "name": "REPLACE_WITH_CONSUMER_SPEC_NAME",
+      "rootFilePath": "openapi.json",
+      "sourceCanonicalSha256": "REPLACE_WITH_64_CHARACTER_CONSUMER_OAS_CANONICAL_SHA256"
+    }
+  },
+  "provider": {
+    "participant": "REPLACE_WITH_PROVIDER_PACTICIPANT",
+    "workspace": {
+      "id": "REPLACE_WITH_PROVIDER_WORKSPACE_ID",
+      "name": "REPLACE_WITH_PROVIDER_WORKSPACE_NAME"
+    },
+    "spec": {
+      "id": "REPLACE_WITH_PROVIDER_SPEC_ID",
+      "name": "REPLACE_WITH_PROVIDER_SPEC_NAME",
+      "rootFilePath": "openapi.json",
+      "sourceCanonicalSha256": "REPLACE_WITH_64_CHARACTER_PROVIDER_OAS_CANONICAL_SHA256"
+    },
+    "collection": {
+      "uid": "REPLACE_WITH_PROVIDER_COLLECTION_UID",
+      "name": "REPLACE_WITH_PROVIDER_COLLECTION_NAME",
+      "canonicalSha256": "REPLACE_WITH_64_CHARACTER_PROVIDER_COLLECTION_CANONICAL_SHA256"
+    }
+  }
+}

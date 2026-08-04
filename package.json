@@ -20,6 +20,7 @@
     "postman:verify": "node tools/pact-harness/scripts/postman/run-workspace-simulation.mjs",
     "handoff:doctor": "node scripts/tpe/prepare-handoff.mjs --check",
     "handoff:prepare": "node scripts/tpe/prepare-handoff.mjs",
+    "customer:package": "node scripts/tpe/package-customer-kit.mjs",
     "test:all": "npm test && npm run check && npm run test:adoption && npm run build:bundle && npm run package:bundle && npm run test:packed",
     "doctor": "node paypal-contract-gate.mjs doctor",
     "verify:contract": "node paypal-contract-gate.mjs verify --clean",

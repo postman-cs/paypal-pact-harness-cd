@@ -59,6 +59,16 @@ function onlyKeys(value, keys, label) {
   if (unknown.length) throw new Error(`${label} contains unknown field(s): ${unknown.sort().join(', ')}`);
 }
 
+function rejectCredentialFields(value, label) {
+  if (!value || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (/(?:password|passphrase|token|secret|api.?key|authorization|credential)/i.test(key)) {
+      throw new Error(`${label} contains forbidden credential field: ${key}`);
+    }
+    rejectCredentialFields(child, label);
+  }
+}
+
 function text(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required`);
   const result = value.trim();
@@ -190,10 +200,17 @@ export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
     'kubernetesNamespace',
   ], 'infrastructure');
   onlyKeys(broker, ['baseUrl', 'includeWipPactsSince', 'targetEnvironment'], 'broker');
-  onlyKeys(postman, ['bindingFile'], 'postman');
-
-  const bindingPath = confinedFile(rootDir, postman.bindingFile, 'postman.bindingFile');
-  const binding = record(JSON.parse(readFileSync(bindingPath, 'utf8')), 'Postman binding file');
+  onlyKeys(postman, ['bindingFile', 'binding'], 'postman');
+  if (Boolean(postman.bindingFile) === Boolean(postman.binding)) {
+    throw new Error('postman must contain exactly one of bindingFile or binding');
+  }
+  const bindingPath = postman.bindingFile
+    ? confinedFile(rootDir, postman.bindingFile, 'postman.bindingFile')
+    : null;
+  const binding = postman.binding
+    ? record(postman.binding, 'Postman inline binding')
+    : record(JSON.parse(readFileSync(bindingPath, 'utf8')), 'Postman binding file');
+  rejectCredentialFields(binding, 'Postman binding');
   const consumer = record(binding.consumer, 'Postman consumer binding');
   const provider = record(binding.provider, 'Postman provider binding');
   const targetEnvironment = text(broker.targetEnvironment, 'broker.targetEnvironment');
@@ -242,7 +259,9 @@ export function validateHandoffConfig(raw, { rootDir = ROOT } = {}) {
       reviewedSourceCommit: values.REVIEWED_SOURCE_COMMIT,
     },
     codebaseConnector: connectorRef(infrastructure.codebaseConnector, 'infrastructure.codebaseConnector'),
-    bindingFile: relative(rootDir, bindingPath).replaceAll('\\', '/'),
+    bindingFile: bindingPath ? relative(rootDir, bindingPath).replaceAll('\\', '/') : null,
+    bindingSource: bindingPath ? relative(rootDir, bindingPath).replaceAll('\\', '/') : 'inline handoff config',
+    binding,
     values,
   };
 }
@@ -328,7 +347,7 @@ function atomicWrite(path, content, { force }) {
 
 function checklist(model, inputSetPath) {
   return `# PayPal Pact Harness handoff\n\n` +
-    `Generated from ${model.bindingFile}. No credentials are stored here.\n\n` +
+    `Generated from ${model.bindingSource}. No credentials are stored here.\n\n` +
     `1. Import \`harness/contract-gate.broker.pipeline.yaml\` into Harness project ` +
     `\`${model.harness.orgIdentifier}/${model.harness.projectIdentifier}\`.\n` +
     `2. Import \`${inputSetPath}\` as an Input Set for ` +
@@ -365,10 +384,11 @@ export function prepareHandoff({
     const manifest = {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
-      classification: 'secret-free Harness handoff',
+      classification: 'customer-confidential operational metadata; contains no credential values',
       pipelineIdentifier: model.harness.pipelineIdentifier,
       release: model.release,
-      postmanBindingFile: model.bindingFile,
+      postmanBindingSource: model.bindingSource,
+      postmanBindingSha256: sha256(`${JSON.stringify(model.binding)}\n`),
       pipelineVariables: PIPELINE_VARIABLES,
       requiredHarnessSecrets: SECRET_IDENTIFIERS,
       inputSet: {
@@ -381,7 +401,7 @@ export function prepareHandoff({
     atomicWrite(join(output, 'README.md'), checklist(model, relativeInputSet), { force });
   }
   console.log(`[ok] release ${model.release.sourceRef} -> ${model.release.reviewedSourceCommit}`);
-  console.log(`[ok] Postman binding ${model.bindingFile}`);
+  console.log(`[ok] Postman binding ${model.bindingSource}`);
   console.log(`[ok] Harness runtime coverage ${PIPELINE_VARIABLES.length}/${PIPELINE_VARIABLES.length}`);
   console.log(check ? '[ready] handoff configuration is valid' : `[ready] import ${relativeInputSet}`);
   return { model, rendered, relativeInputSet };
@@ -410,13 +430,13 @@ function parseArgs(argv) {
 }
 
 function help() {
-  console.log(`Prepare a secret-free PayPal Pact Harness handoff\n\n` +
+  console.log(`Prepare a credential-free PayPal Pact Harness handoff\n\n` +
     `Usage:\n` +
     `  node scripts/tpe/prepare-handoff.mjs --config .contract-handoff/config.json [--out-dir .contract-handoff]\n` +
     `  node scripts/tpe/prepare-handoff.mjs --config .contract-handoff/config.json --check\n\n` +
     `Copy config/paypal-tpe-handoff.example.json into .contract-handoff/config.json,\n` +
-    `replace the customer-owned connector and Broker placeholders, then run this command.\n` +
-    `The generated Harness Input Set contains no secrets.\n`);
+    `replace every Harness, connector, Broker, and Postman placeholder, then run this command.\n` +
+    `The generated Input Set contains no credential values but is customer-confidential operational metadata.\n`);
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
