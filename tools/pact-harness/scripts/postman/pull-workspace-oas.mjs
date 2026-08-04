@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDoc } from '../../src/lib/load.mjs';
 
@@ -180,7 +180,8 @@ export async function pullWorkspaceOas({
   return { manifestPath, ...manifest };
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === fileURLToPath(new URL(`file://${process.argv[1]}`));
+const isMain = process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   const result = await pullWorkspaceOas({
     consumerWorkspaceId: arg('consumer-workspace-id'),

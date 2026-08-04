@@ -57,7 +57,9 @@ test('the Pact CLI installer verifies bytes and digest before making a binary ex
   });
   assert.equal(result.reused, false);
   assert.deepEqual(readFileSync(output), content);
-  assert.notEqual(statSync(output).mode & 0o111, 0);
+  if (process.platform !== 'win32') {
+    assert.notEqual(statSync(output).mode & 0o111, 0);
+  }
 
   const reused = await installPactCli({
     lockPath,

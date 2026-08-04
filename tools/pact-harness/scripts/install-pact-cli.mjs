@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -119,7 +119,8 @@ export async function installPactCli({
   return { version: lock.version, output, sha256: actual, reused: false };
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === fileURLToPath(new URL(`file://${process.argv[1]}`));
+const isMain = process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   const result = await installPactCli({
     lockPath: arg('lock', DEFAULT_LOCK_PATH),

@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HARNESS = join(ROOT, 'harness');
 
 function yamlFiles(directory) {
@@ -33,7 +34,7 @@ test('every Harness container image is immutable and every KubernetesDirect pod 
       if (typeof node.image === 'string') {
         assert.match(node.image, /@sha256:[a-f0-9]{64}$/, `${file}: mutable image ${node.image}`);
       }
-      if (typeof node.command === 'string') {
+      if (typeof node.command === 'string' && process.platform !== 'win32') {
         const syntax = spawnSync('/bin/sh', ['-n'], { input: node.command, encoding: 'utf8' });
         assert.equal(syntax.status, 0, `${file}: invalid shell command\n${syntax.stderr}`);
       }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 function arg(name) {
@@ -72,7 +72,7 @@ export async function syncCloudCollection({
 }
 
 const isMain = process.argv[1] &&
-  fileURLToPath(import.meta.url) === fileURLToPath(new URL(`file://${process.argv[1]}`));
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
   const collectionPath = arg('collection');

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 function arg(name, fallback) {
@@ -74,7 +74,7 @@ export async function collectInventories(sources, {
 }
 
 const isMain = process.argv[1] &&
-  fileURLToPath(import.meta.url) === fileURLToPath(new URL(`file://${process.argv[1]}`));
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
   const outDir = arg('out-dir', '.contract-reports/inventory');
