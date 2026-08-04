@@ -68,7 +68,7 @@ stage:
             identifier: attest_postman_cs_pact_harness
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
@@ -115,13 +115,14 @@ stage:
             identifier: publish_validated_pacts
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
                 PACT_BROKER_USERNAME: <+stage.variables.broker_username>
                 PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                 PACT_DO_NOT_TRACK: "true"
+                SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                 PACTS_PATH: <+stage.variables.pacts_path>
                 CONSUMER_APP_VERSION: <+stage.variables.consumer_app_version>
                 CONSUMER_BRANCH: <+stage.variables.consumer_branch>
@@ -129,6 +130,9 @@ stage:
                 set -eu
                 REPORTS=.contract-reports/pact-consumer
                 mkdir -p "$REPORTS"
+                rm -f "$REPORTS/publish.json" "$REPORTS/publish.stderr.txt"
+                test -r "$SSL_CERT_FILE"
+                node .pact-harness-source/scripts/ci/pact-broker-preflight.mjs
                 node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
                   --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
                   --output .pact/bin/pact
@@ -139,6 +143,8 @@ stage:
                   --branch "$CONSUMER_BRANCH" \
                   --validate \
                   --strict \
+                  --retries 3 \
+                  --log-level error \
                   --output json \
                   > "$REPORTS/publish.json" \
                   2> "$REPORTS/publish.stderr.txt"

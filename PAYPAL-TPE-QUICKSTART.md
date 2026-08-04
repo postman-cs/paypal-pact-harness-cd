@@ -52,15 +52,28 @@ independently.
 ## 3. Add the existing Harness stage
 
 Import `harness/stages/consumer-contract-gate.yaml` immediately before the
-existing promotion stage. Use a repository-scoped GitHub connector whose URL is
-exactly `https://github.com/postman-cs/paypal-pact-harness-cd.git`. The import has
-five meaningful inputs:
+existing promotion stage in the PayPal application pipeline. The application
+repository remains the primary checkout. A native additional `GitClone` pulls only
+`postman-cs/paypal-pact-harness-cd` using a read-only connector whose URL is exactly
+`https://github.com/postman-cs/paypal-pact-harness-cd.git`.
 
-- codebase connector;
-- Kubernetes connector and namespace;
-- application base URL;
-- Actuator URL; and
-- generated OpenAPI URL.
+Bind these input groups:
+
+- the Postman-CS Git connector, approved release tag, and exact reviewed commit;
+- the container-registry connector, Kubernetes connector, and namespace;
+- the application base, Actuator, and generated OpenAPI URLs;
+- the customer profile path; and
+- either a customer-repository Collection path or the Postman Cloud Collection
+  UID, workspace ID, reviewed canonical digest, and explicit cloud-mode switch.
+
+The supplied consumer publication stage executes JavaScript consumers in its
+digest-pinned Node image. A Java or .NET consumer team should copy that stage and
+replace only the generation step's image with an approved digest-pinned language
+runtime; the publication and attestation steps stay unchanged.
+
+Harness reads credentials only from the documented project secrets. The modular
+stage cannot be handed off on a floating development branch: Postman-CS must first
+publish a protected release tag for the reviewed commit.
 
 The contract, subset, policy, exceptions, and report location stay in the single
 versioned JSON profile. Harness injects credentials from secrets and runs the
@@ -68,15 +81,29 @@ same `verify` command in Kubernetes. Its first step verifies the full checkout
 identity and Harness commit SHA, then validates the portable CLI and locked
 Postman-CS comparator before any customer endpoint is called.
 
-That stage is for a dedicated pipeline whose primary codebase is this toolkit.
-If the primary checkout must remain PayPal's application repository, follow
-[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md) and import
-`harness/stages/consumer-contract-gate.vendored.yaml` instead.
+If the PayPal runtime cannot read the Postman-CS repository, follow
+[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md) and use the explicitly
+offline `consumer-contract-gate.vendored.yaml` stage instead.
 
-## Optional Postman runtime cases
+## 4. Import the single-repository Broker proof
 
-The Harness stage runs the committed collection with Postman CLI 1.45.0. For a
-local run, set `postman.enabled` to `true`, set `postman.baseUrl`, and supply:
+For the supplied Orders integration demonstration, import
+`harness/contract-gate.broker.pipeline.yaml` from this repository. Its primary
+codebase is `paypal-pact-harness-cd`; no second code repository is needed. The
+template uses neutral runtime inputs for the container registry, Kubernetes
+connector, and namespace.
+
+PayPal must still supply its own Postman workspace/spec/Collection identifiers and
+reviewed digests, Pact Broker URL, connector bindings, and Harness secrets. This
+proof uses the demo provider and seeded consumer Pact. It is not a substitute for
+consumer-generated contracts, a PayPal deployment, target-environment smoke tests,
+or `record-deployment`.
+
+## Optional local Postman runtime cases
+
+The Harness stage requires an explicitly selected customer Collection and runs its
+sealed snapshot with Postman CLI 1.45.0. For an optional local run, set
+`postman.enabled` to `true`, set `postman.baseUrl`, and supply:
 
 ```bash
 export CONTRACT_DEMO_TOKEN="..."

@@ -45,16 +45,31 @@ stage boundaries unless the customer adds an explicit artifact handoff.
 See `docs/PACT-BROKER-RUNBOOK.md` for why each signal is separate and how to roll
 it out from shadow mode to a blocking production gate.
 
-For a single lower-environment integration run, import
-`contract-gate.broker.pipeline.yaml`. It starts the authenticated demo provider,
-pulls both OAS contracts from Postman, runs the existing static/provider gates,
-publishes the seeded Pact, performs official provider verification, and ends with
-Broker `can-i-deploy`. It intentionally does not deploy or call
-`record-deployment`; the committed Pact is integration-test evidence and must be
-replaced by consumer-repository executable Pact output in production.
+For a single-repository lower-environment integration run, import
+`contract-gate.broker.pipeline.yaml` directly from
+`postman-cs/paypal-pact-harness-cd`. The codebase connector selects this repository;
+the pipeline does not clone a customer application or a second utility repository.
+It starts the authenticated demo provider, pulls both OAS contracts from Postman,
+runs the static/provider gates and approved provider Collection, publishes the
+seeded Pact, performs official provider verification, and ends with Broker
+`can-i-deploy`.
 
-The complete Broker proof requires three inputs that are deliberately independent
-of the Harness trigger shape:
+"Single repository" describes the supplied code, not a zero-configuration hosted
+service. PayPal must bind its own read-only GitHub connector, container-registry
+connector, Kubernetes connector/namespace, Postman workspaces, Pact Broker, and
+secret references. No connector name tied to Postman infrastructure is committed.
+The template exposes one shared `CONTAINER_REGISTRY_CONNECTOR`, one
+`KUBERNETES_CONNECTOR`, and one `KUBERNETES_NAMESPACE` input instead of prompting
+for a connector on every workload step.
+
+The integration proof intentionally does not deploy or call `record-deployment`;
+the committed Pact is seeded integration evidence and must be replaced by
+consumer-repository executable Pact output in production.
+The complete input inventory and production handoff boundary are in
+`docs/SINGLE-REPOSITORY-HANDOFF.md`.
+
+The complete Broker proof requires three identity inputs that are deliberately
+independent of the Harness trigger shape:
 
 - `REVIEWED_SOURCE_COMMIT`: the separately reviewed full SHA expected at `HEAD`;
 - `CONSUMER_PACT_BRANCH`: the logical consumer branch recorded in the Broker; and
@@ -63,6 +78,14 @@ of the Harness trigger shape:
 Set these values explicitly for branch, tag, pull-request, and manual runs. The
 selected Harness build ref only locates the checkout; it is not an approval signal,
 application version, or source of Pact branch metadata.
+
+The proof also requires `PROVIDER_COLLECTION_UID`,
+`PROVIDER_COLLECTION_WORKSPACE_ID`, and
+`PROVIDER_COLLECTION_CANONICAL_SHA256`. The runner proves workspace membership and
+canonical content before executing a sealed snapshot against the lower provider.
+Provider JUnit must contain at least one successful, non-skipped case, and
+`can-i-deploy` must return a nonempty matrix with at least one success and no failed
+or unknown checks. Empty or vacuously successful evidence is rejected.
 
 ## Source checkout and portable CLI trust boundary
 
@@ -82,10 +105,12 @@ deployment decision step. The attestation fails closed unless all of these are t
 
 Create a repository-scoped GitHub connector whose URL is exactly
 `https://github.com/postman-cs/paypal-pact-harness-cd.git`, with read access and
-API access enabled for webhook triggers. Bind the pipeline's remaining
-`connectorRef: <+input>` to that connector in a Harness Input Set or trigger.
-An account-scoped connector is also supported because `repoName` is fixed and the
-attestation independently verifies the full owner/repository identity.
+API access enabled for webhook triggers. Bind the CI codebase connector input to
+that connector. Bind `CONTAINER_REGISTRY_CONNECTOR` to the connector that can pull
+the digest-pinned Node and Maven images, and bind `KUBERNETES_CONNECTOR` to the
+customer's Harness delegate-backed Kubernetes connector. An account-scoped GitHub
+connector is also supported because `repoName` is fixed and the attestation
+independently verifies the full owner/repository identity.
 
 Every runtime stage under `harness/stages/` except the explicitly offline
 `consumer-contract-gate.vendored.yaml` uses that connector as an additional native

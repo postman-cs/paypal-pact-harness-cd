@@ -148,6 +148,7 @@ text reporter artifacts are credential-redacted and re-sealed before publication
 | `harness/` | drop-in stage plus self-test, lower, and Postman-backed pipeline templates |
 | `pact-cli.lock.json`, `scripts/install-pact-cli.mjs` | digest-locked official OSS Pact CLI used by production lifecycle stages |
 | `docs/ARCHITECTURE.md` | complete system map, execution sequence, evidence flow, and ownership boundaries |
+| `docs/SINGLE-REPOSITORY-HANDOFF.md` | exact one-repository Harness import, neutral runtime bindings, and remaining production responsibilities |
 | `docs/PACT-BROKER-RUNBOOK.md` | Postman-first Pact CDC topology, operations, rollout, and learning guide |
 
 ## Actions vs Harness — the point

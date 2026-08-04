@@ -101,6 +101,9 @@ Runtime inputs must supply both Postman workspace IDs and Spec Hub IDs, Pact
 participant names, Broker URL, target environment, and the date from which WIP
 pacts are included. The complete lower Broker proof also requires an independently
 reviewed full source SHA plus explicit consumer and provider logical Pact branches.
+Its approved provider Collection is supplied as a Collection UID, expected workspace
+ID, and reviewed canonical SHA-256. The run fetches that exact Cloud Collection,
+seals a local snapshot, and executes it against the lower provider before publishing.
 Do not derive those values from the selected branch/tag, pull-request target, or a
 manual-run default. Use the immutable Git commit SHA as every application version;
 never publish mutable labels such as `latest` as a version.
@@ -143,7 +146,9 @@ copy the provider's entire response or OAS.
    provider conformance evidence.
 
 The verifier deliberately does not use `--ignore-no-pacts-error`: an empty or
-misconfigured Broker selection fails closed.
+misconfigured Broker selection fails closed. The emitted JUnit must also contain at
+least one successful, non-skipped verification case; zero-case and all-skipped
+reports fail even when the verifier exits successfully.
 
 ## Deploy pipeline
 
@@ -156,6 +161,12 @@ misconfigured Broker selection fails closed.
 `can-i-deploy` is a question about known compatibility with the versions currently
 deployed in an environment. `record-deployment` changes that environment state.
 Reversing these operations corrupts the decision graph.
+
+The gate also requires a nonempty compatibility matrix, `deployable=true`, at least
+one successful dependency check, and zero failed or unknown checks. An empty matrix
+with `success=0` is not deployment evidence. A legitimate first green requires a
+real consumer pact and real deployed/released consumer state in `lower`; do not
+manufacture deployment state inside the gate merely to make it green.
 
 ## Rollout plan
 

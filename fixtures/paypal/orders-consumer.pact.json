@@ -8,6 +8,11 @@
   "interactions": [
     {
       "description": "Show order details (200)",
+      "providerStates": [
+        {
+          "name": "order 5O190127TN364715T exists"
+        }
+      ],
       "request": {
         "method": "GET",
         "path": "/v2/checkout/orders/5O190127TN364715T",
@@ -100,6 +105,11 @@
     },
     {
       "description": "Show order details (404)",
+      "providerStates": [
+        {
+          "name": "order missing-order does not exist"
+        }
+      ],
       "request": {
         "method": "GET",
         "path": "/v2/checkout/orders/missing-order",

@@ -103,7 +103,7 @@ stage:
             identifier: attest_postman_cs_pact_harness
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
@@ -123,13 +123,14 @@ stage:
             identifier: verify_selected_pacts
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
                 PACT_BROKER_USERNAME: <+stage.variables.broker_username>
                 PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                 PACT_DO_NOT_TRACK: "true"
+                SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                 PROVIDER_NAME: <+stage.variables.provider_name>
                 PROVIDER_VERSION: <+stage.variables.provider_version>
                 PROVIDER_BRANCH: <+stage.variables.provider_branch>
@@ -148,6 +149,10 @@ stage:
                 set -eu
                 REPORTS=.contract-reports/pact-provider
                 mkdir -p "$REPORTS"
+                rm -f "$REPORTS/provider-verification.xml" \
+                  "$REPORTS/provider-verification.json"
+                test -r "$SSL_CERT_FILE"
+                node .pact-harness-source/scripts/ci/pact-broker-preflight.mjs
                 node .pact-harness-source/scripts/ci/wait-for-provider.mjs
                 node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
                   --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
@@ -166,6 +171,7 @@ stage:
                   --include-wip-pacts-since "$INCLUDE_WIP_PACTS_SINCE" \
                   --header "Authorization=Bearer $PROVIDER_BEARER_TOKEN" \
                   --publish \
+                  --retries 3 \
                   --junit "$REPORTS/provider-verification.xml" \
                   --json "$REPORTS/provider-verification.json" \
                   --no-colour
@@ -173,6 +179,9 @@ stage:
                 [ -z "$STATE_CHANGE_URL" ] || set -- "$@" --state-change-url "$STATE_CHANGE_URL"
 
                 .pact/bin/pact verifier "$@"
+                node .pact-harness-source/scripts/ci/assert-pact-evidence.mjs \
+                  provider-verification \
+                  --junit "$REPORTS/provider-verification.xml"
               reports:
                 type: JUnit
                 spec:

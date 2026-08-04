@@ -63,7 +63,7 @@ stage:
             identifier: attest_postman_cs_pact_harness
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 EXPECTED_SOURCE_COMMIT: <+stage.variables.harness_source_commit>
@@ -83,13 +83,14 @@ stage:
             identifier: broker_can_i_deploy
             spec:
               connectorRef: <+input>
-              image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+              image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
               shell: Sh
               envVariables:
                 PACT_BROKER_BASE_URL: <+stage.variables.broker_base_url>
                 PACT_BROKER_USERNAME: <+stage.variables.broker_username>
                 PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                 PACT_DO_NOT_TRACK: "true"
+                SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                 PACTICIPANT: <+stage.variables.pacticipant>
                 PACTICIPANT_VERSION: <+stage.variables.version>
                 TARGET_ENVIRONMENT: <+stage.variables.target_environment>
@@ -97,6 +98,10 @@ stage:
                 set -eu
                 REPORTS=.contract-reports/pact-deploy
                 mkdir -p "$REPORTS"
+                rm -f "$REPORTS/can-i-deploy.json" \
+                  "$REPORTS/can-i-deploy.stderr.txt"
+                test -r "$SSL_CERT_FILE"
+                node .pact-harness-source/scripts/ci/pact-broker-preflight.mjs
                 node .pact-harness-source/tools/pact-harness/scripts/install-pact-cli.mjs \
                   --lock .pact-harness-source/tools/pact-harness/pact-cli.lock.json \
                   --output .pact/bin/pact
@@ -106,6 +111,7 @@ stage:
                   --pacticipant "$PACTICIPANT" \
                   --version "$PACTICIPANT_VERSION" \
                   --to-environment "$TARGET_ENVIRONMENT" \
+                  --retries 3 \
                   --retry-while-unknown 6 \
                   --retry-interval 10 \
                   --output json \
@@ -114,8 +120,11 @@ stage:
                 status=$?
                 set -e
                 cat "$REPORTS/can-i-deploy.stderr.txt" >&2
+                [ "$status" -eq 0 ] || exit "$status"
+                node .pact-harness-source/scripts/ci/assert-pact-evidence.mjs \
+                  can-i-deploy \
+                  --json "$REPORTS/can-i-deploy.json"
                 cat "$REPORTS/can-i-deploy.json"
-                exit "$status"
               resources:
                 limits:
                   memory: 500Mi

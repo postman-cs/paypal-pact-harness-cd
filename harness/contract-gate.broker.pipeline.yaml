@@ -5,6 +5,8 @@
 # pact-record-deployment only after deployment + Postman smoke checks succeed.
 # The committed pact used here is seeded integration evidence; production consumer
 # repositories must publish pacts created by executable tests of their real clients.
+# This complete proof imports from this repository only. Connectors, secrets, the
+# Broker, and the two Postman workspaces remain customer-owned runtime dependencies.
 pipeline:
   name: PayPal Postman and Pact Broker proof - lower
   identifier: paypal_postman_pact_broker_lower
@@ -17,6 +19,15 @@ pipeline:
         repoName: paypal-pact-harness-cd
         build: <+input>
   variables:
+    - name: CONTAINER_REGISTRY_CONNECTOR
+      type: String
+      value: <+input>
+    - name: KUBERNETES_CONNECTOR
+      type: String
+      value: <+input>
+    - name: KUBERNETES_NAMESPACE
+      type: String
+      value: <+input>.default(paypal-contract-lower)
     - name: BROKER_BASE_URL
       type: String
       value: <+input>
@@ -47,6 +58,15 @@ pipeline:
     - name: PROVIDER_SPEC_CANONICAL_SHA256
       type: String
       value: <+input>
+    - name: PROVIDER_COLLECTION_UID
+      type: String
+      value: <+input>
+    - name: PROVIDER_COLLECTION_WORKSPACE_ID
+      type: String
+      value: <+input>
+    - name: PROVIDER_COLLECTION_CANONICAL_SHA256
+      type: String
+      value: <+input>
     - name: INCLUDE_WIP_PACTS_SINCE
       type: String
       value: <+input>
@@ -70,7 +90,7 @@ pipeline:
                   name: Attest Postman-CS source and portable CLI
                   identifier: source_attestation
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
@@ -89,7 +109,7 @@ pipeline:
                   name: Orders provider under test
                   identifier: orders_provider_under_test
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237
                     shell: Sh
                     envVariables:
@@ -113,7 +133,7 @@ pipeline:
                   name: Postman dual-OAS and static BDC preflight
                   identifier: postman_static_preflight
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
@@ -159,7 +179,7 @@ pipeline:
                   name: Existing Postman and provider-conformance gate
                   identifier: existing_postman_provider_gate
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
                     shell: Sh
                     envVariables:
@@ -187,10 +207,43 @@ pipeline:
                         cpu: "0.5"
               - step:
                   type: Run
+                  name: Approved Postman provider Collection against lower
+                  identifier: postman_provider_collection
+                  spec:
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
+                    image: node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
+                    shell: Sh
+                    envVariables:
+                      POSTMAN_API_KEY: <+secrets.getValue("paypal_postman_service_account_pmak")>
+                      CONTRACT_DEMO_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
+                    command: |
+                      set -eu
+                      export HOME="$PWD/.ci-home"
+                      mkdir -p "$HOME"
+                      npm install --global --prefix "$PWD/.postman-cli" postman-cli@1.45.0
+                      export PATH="$PWD/.postman-cli/bin:$PATH"
+                      node tools/pact-harness/scripts/postman/run-lower-collection.mjs \
+                        --collection "<+pipeline.variables.PROVIDER_COLLECTION_UID>" \
+                        --base-url http://127.0.0.1:8080 \
+                        --out-dir .contract-reports/postman \
+                        --cloud \
+                        --workspace-id "<+pipeline.variables.PROVIDER_COLLECTION_WORKSPACE_ID>" \
+                        --expected-sha256 "<+pipeline.variables.PROVIDER_COLLECTION_CANONICAL_SHA256>"
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - .contract-reports/postman/postman-run.xml
+                    resources:
+                      limits:
+                        memory: 500Mi
+                        cpu: "0.5"
+              - step:
+                  type: Run
                   name: Publish seeded lower consumer pact
                   identifier: publish_seeded_consumer_pact
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
@@ -233,7 +286,7 @@ pipeline:
                   name: Official provider verification and publication
                   identifier: official_provider_verification
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
@@ -249,6 +302,8 @@ pipeline:
                       set -eu
                       REPORTS=.contract-reports/pact-provider
                       mkdir -p "$REPORTS"
+                      rm -f "$REPORTS/provider-verification.xml" \
+                        "$REPORTS/provider-verification.json"
                       test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
@@ -272,6 +327,8 @@ pipeline:
                         --junit "$REPORTS/provider-verification.xml" \
                         --json "$REPORTS/provider-verification.json" \
                         --no-colour
+                      node scripts/ci/assert-pact-evidence.mjs provider-verification \
+                        --junit "$REPORTS/provider-verification.xml"
                     reports:
                       type: JUnit
                       spec:
@@ -286,7 +343,7 @@ pipeline:
                   name: Broker can-i-deploy lower gate
                   identifier: broker_can_i_deploy_lower
                   spec:
-                    connectorRef: <+input>
+                    connectorRef: <+pipeline.variables.CONTAINER_REGISTRY_CONNECTOR>
                     image: node:24@sha256:19cd848a0e073d34bd8cd5545a1b6b4d28489b3e3b607366621ced442bd5f6b4
                     shell: Sh
                     envVariables:
@@ -295,17 +352,21 @@ pipeline:
                       PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
                       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+                      CONSUMER_APP_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                       PROVIDER_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                     command: |
                       set -eu
                       REPORTS=.contract-reports/pact-deploy
                       mkdir -p "$REPORTS"
+                      rm -f "$REPORTS/can-i-deploy.json"
                       test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
                       .pact/bin/pact broker can-i-deploy \
+                        --pacticipant orders-checkout-consumer \
+                        --version "$CONSUMER_APP_VERSION" \
                         --pacticipant paypal-orders \
                         --version "$PROVIDER_VERSION" \
                         --to-environment "<+pipeline.variables.TARGET_ENVIRONMENT>" \
@@ -314,6 +375,8 @@ pipeline:
                         --retry-interval 10 \
                         --output json \
                         > "$REPORTS/can-i-deploy.json"
+                      node scripts/ci/assert-pact-evidence.mjs can-i-deploy \
+                        --json "$REPORTS/can-i-deploy.json"
                       cat "$REPORTS/can-i-deploy.json"
                     resources:
                       limits:
@@ -322,8 +385,8 @@ pipeline:
           infrastructure:
             type: KubernetesDirect
             spec:
-              connectorRef: <+input>
-              namespace: <+input>.default(paypal-contract-lower)
+              connectorRef: <+pipeline.variables.KUBERNETES_CONNECTOR>
+              namespace: <+pipeline.variables.KUBERNETES_NAMESPACE>
               automountServiceAccountToken: false
               nodeSelector: {}
               containerSecurityContext:

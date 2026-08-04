@@ -167,6 +167,7 @@ test('every Postman Cloud Harness invocation pins workspace membership and canon
   const files = [
     join(HARNESS, 'stages', 'consumer-contract-gate.yaml'),
     join(HARNESS, 'stages', 'consumer-contract-gate.vendored.yaml'),
+    join(HARNESS, 'contract-gate.broker.pipeline.yaml'),
     join(HARNESS, 'contract-gate.lower.pipeline.yaml'),
   ];
 

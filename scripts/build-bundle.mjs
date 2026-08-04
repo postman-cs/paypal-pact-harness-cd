@@ -84,7 +84,7 @@ writeFileSync(
   join(dist, 'package.json'),
   JSON.stringify({
     name: 'pact-harness-bundle',
-    version: '0.4.0',
+    version: '0.5.0',
     private: true,
     type: 'module',
     bin: {
