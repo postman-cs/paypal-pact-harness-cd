@@ -86,7 +86,7 @@ function connectorRef(value, label) {
 function releaseTag(value) {
   const result = text(value, 'release.sourceRef');
   if (!/^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(result)) {
-    throw new Error('release.sourceRef must be an immutable semantic release tag such as v0.5.0');
+    throw new Error('release.sourceRef must be an immutable semantic release tag such as v1.2.3');
   }
   return result;
 }

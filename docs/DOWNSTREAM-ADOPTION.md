@@ -14,12 +14,12 @@ Clone the protected toolkit release and verify the full commit supplied by
 Postman. Do not use a floating branch in a customer pipeline.
 
 ```bash
-git clone --branch v0.5.0 --single-branch \
+git clone --branch v0.6.0 --single-branch \
   https://github.com/postman-cs/paypal-pact-harness-cd.git
 cd paypal-pact-harness-cd
-test "$(git rev-parse HEAD)" = d099ca437e7b0b12933a1ff168b3d9699168698f
+test "$(git rev-parse HEAD)" = 5c78b1e9aaa6da92db3c0683b71849a639155f21
 node scripts/ci/attest-harness-source.mjs \
-  --expected-commit d099ca437e7b0b12933a1ff168b3d9699168698f
+  --expected-commit 5c78b1e9aaa6da92db3c0683b71849a639155f21
 ```
 
 The default branch is the maintained onboarding surface. Customer pipeline runtime
