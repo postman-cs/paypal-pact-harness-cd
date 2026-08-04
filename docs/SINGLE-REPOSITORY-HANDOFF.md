@@ -53,7 +53,7 @@ created and handled the interactions.
 The production consumer-driven lifecycle needs customer-owned work outside this
 single demonstration pipeline:
 
-1. Bind every additional-clone modular stage to protected release `v0.6.0` and
+1. Bind every additional-clone modular stage to protected release `v0.6.1` and
    its reviewed full commit, or to a later protected toolkit release.
 2. Add `pact-consumer-publish.yaml` to each real consumer repository and run its
    Pact tests against the production client code. Do not publish the seeded fixture.

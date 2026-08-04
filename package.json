@@ -1,6 +1,6 @@
 {
   "name": "paypal-pact-harness-cd",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "Postman-first contract testing for PayPal: a self-contained static BDC gate plus Harness stages for the official open-source Pact consumer/provider lifecycle.",

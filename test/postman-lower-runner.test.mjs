@@ -33,7 +33,6 @@ function successfulPostman(calls) {
     if (args[0] === '--version') return { status: 0, stdout: '1.45.0\n', stderr: '' };
     writeFileSync(args[args.indexOf('--reporter-json-export') + 1], JSON.stringify({
       run: {
-        failures: [],
         stats: {
           requests: { total: 1, pending: 0, failed: 0 },
           assertions: { total: 2, pending: 0, failed: 0 },
