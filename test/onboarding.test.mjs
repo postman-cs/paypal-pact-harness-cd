@@ -18,16 +18,16 @@ test('customer-facing Postman commands use the committed install-free bundle', (
 });
 
 test('the documented immutable release still resolves to its reviewed commit', () => {
-  const expected = '7e9070eebd423591f4646fc40b1ef997bbab528d';
-  const resolved = spawnSync('git', ['rev-parse', '--verify', 'refs/tags/v0.6.2^{commit}'], {
+  const expected = 'b827040c2fa7640bd71142930aa04ac97fbe90db';
+  const resolved = spawnSync('git', ['rev-parse', '--verify', 'refs/tags/v0.6.3^{commit}'], {
     cwd: ROOT,
     encoding: 'utf8',
   });
   assert.equal(resolved.status, 0, resolved.stderr);
   assert.equal(resolved.stdout.trim(), expected);
   for (const path of ['paypal-contract-gate.mjs', 'harness/contract-gate.broker.pipeline.yaml']) {
-    const asset = spawnSync('git', ['cat-file', '-e', `v0.6.2:${path}`], { cwd: ROOT, encoding: 'utf8' });
-    assert.equal(asset.status, 0, `${path} must exist in v0.6.2`);
+    const asset = spawnSync('git', ['cat-file', '-e', `v0.6.3:${path}`], { cwd: ROOT, encoding: 'utf8' });
+    assert.equal(asset.status, 0, `${path} must exist in v0.6.3`);
   }
 });
 
@@ -36,8 +36,8 @@ test('handoff documentation has no pre-release branch instructions', () => {
   const handoff = readFileSync(join(ROOT, 'docs', 'SINGLE-REPOSITORY-HANDOFF.md'), 'utf8');
   assert.doesNotMatch(downstream, /Until PR #1|agent\/consumer-contract-e2e/);
   assert.doesNotMatch(handoff, /Publish a protected release tag/);
-  assert.match(downstream, /--branch v0\.6\.2/);
-  assert.match(handoff, /protected release `v0\.6\.2`/);
+  assert.match(downstream, /--branch v0\.6\.3/);
+  assert.match(handoff, /protected release `v0\.6\.3`/);
 });
 
 test('GitHub release checks fetch immutable tags instead of using a shallow checkout', () => {

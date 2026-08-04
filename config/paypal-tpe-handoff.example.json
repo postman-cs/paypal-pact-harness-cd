@@ -7,8 +7,8 @@
     "inputSetIdentifier": "paypal_pact_broker_lower"
   },
   "release": {
-    "sourceRef": "v0.6.2",
-    "reviewedSourceCommit": "7e9070eebd423591f4646fc40b1ef997bbab528d",
+    "sourceRef": "v0.6.3",
+    "reviewedSourceCommit": "b827040c2fa7640bd71142930aa04ac97fbe90db",
     "consumerPactBranch": "main",
     "providerPactBranch": "main"
   },
