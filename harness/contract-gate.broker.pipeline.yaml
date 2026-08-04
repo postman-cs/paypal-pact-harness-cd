@@ -213,6 +213,8 @@ pipeline:
                           --branch "$CONSUMER_PACT_BRANCH" \
                           --validate \
                           --strict \
+                          --retries 0 \
+                          --log-level error \
                           --output json \
                           > .contract-reports/pact-consumer/publish.json 2>&1; then
                         node -e 'const fs=require("node:fs");let text=fs.readFileSync(process.argv[1],"utf8");for(const name of ["PACT_BROKER_PASSWORD"]){const secret=process.env[name];if(secret)text=text.split(secret).join("[REDACTED]")}process.stderr.write(text)' \

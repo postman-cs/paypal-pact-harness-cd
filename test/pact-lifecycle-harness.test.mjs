@@ -126,6 +126,8 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
   assert.match(source, /PROVIDER_VERSION: <\+pipeline\.variables\.REVIEWED_SOURCE_COMMIT>/);
   assert.match(source, /CONSUMER_PACT_BRANCH: <\+pipeline\.variables\.CONSUMER_PACT_BRANCH>/);
   assert.match(source, /PROVIDER_PACT_BRANCH: <\+pipeline\.variables\.PROVIDER_PACT_BRANCH>/);
+  assert.match(source, /broker publish[\s\S]{0,500}--retries 0[\s\S]{0,100}--log-level error/,
+    'the diagnostic Broker proof must surface the first publication error without exponential backoff');
   assert.doesNotMatch(source, /<\+codebase\.branch>/,
     'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
 });
