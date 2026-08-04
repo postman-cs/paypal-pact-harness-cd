@@ -25,6 +25,12 @@ To adapt it, edit the single secret-free
 five-minute handoff and live-service environment variables, see
 [`PAYPAL-TPE-QUICKSTART.md`](PAYPAL-TPE-QUICKSTART.md).
 
+To keep a PayPal application repository as the primary pipeline checkout, use
+the pinned vendoring and customer-owned Harness flow in
+[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md). Do not paste the
+toolkit-primary stage unchanged into an application repository: its strict source
+attestation intentionally accepts only this Postman-CS repository.
+
 **Consumer engine source of truth.** This repo carries the engine source
 (`src/`), the tests (`test/`), the build (`scripts/build-bundle.mjs` → `tools/pact-harness`),
 the fixtures, the GitHub composite action, Harness stages, the Orders Spring Boot lower-
@@ -107,6 +113,7 @@ npm run check        # determinism: golden pact matches its generator
 npm run build:bundle # regenerate tools/pact-harness/ from src/ (what the pipelines run)
 npm run package:bundle # produce the portable .tgz + SHA-256 release metadata in dist/
 npm run test:packed    # extract the .tgz in a clean path and prove it needs no install
+npm run test:adoption  # vendor into three temporary customer repos and prove the lifecycle boundary
 npm run test:all       # full local release gate
 ```
 The contract engine never needs `npm install` at runtime—it calls the committed

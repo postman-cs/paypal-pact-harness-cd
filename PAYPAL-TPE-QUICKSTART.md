@@ -68,6 +68,11 @@ same `verify` command in Kubernetes. Its first step verifies the full checkout
 identity and Harness commit SHA, then validates the portable CLI and locked
 Postman-CS comparator before any customer endpoint is called.
 
+That stage is for a dedicated pipeline whose primary codebase is this toolkit.
+If the primary checkout must remain PayPal's application repository, follow
+[`docs/DOWNSTREAM-ADOPTION.md`](docs/DOWNSTREAM-ADOPTION.md) and import
+`harness/stages/consumer-contract-gate.vendored.yaml` instead.
+
 ## Optional Postman runtime cases
 
 The Harness stage runs the committed collection with Postman CLI 1.45.0. For a

@@ -93,6 +93,15 @@ the shared team workspace by running
 `tools/pact-harness/scripts/postman/sync-cloud-collection.mjs` with the target
 workspace ID, then replace `POSTMAN_COLLECTION_ID`.
 
+### Customer-owned primary checkout
+
+The stage above deliberately attests that the primary checkout is this
+Postman-CS repository. For an application pipeline whose primary checkout must
+remain the PayPal repository, vendor the pinned bundle and import
+`stages/consumer-contract-gate.vendored.yaml`. The full install, lock,
+cross-platform byte-preservation, local proof, and update process are in
+[`../docs/DOWNSTREAM-ADOPTION.md`](../docs/DOWNSTREAM-ADOPTION.md).
+
 ## B. Lower-environment pipeline
 
 `contract-gate.lower.pipeline.yaml` is the complete KubernetesDirect import shape.

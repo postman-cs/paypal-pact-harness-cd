@@ -13,7 +13,8 @@
     "build:bundle": "node scripts/build-bundle.mjs",
     "package:bundle": "node scripts/package-bundle.mjs",
     "test:packed": "node scripts/test-packed-bundle.mjs",
-    "test:all": "npm test && npm run check && npm run build:bundle && npm run package:bundle && npm run test:packed",
+    "test:adoption": "node scripts/simulate-downstream-adoption.mjs",
+    "test:all": "npm test && npm run check && npm run build:bundle && npm run package:bundle && npm run test:packed && npm run test:adoption",
     "doctor": "node paypal-contract-gate.mjs doctor",
     "verify:contract": "node paypal-contract-gate.mjs verify --clean",
     "demo": "node demo/demo.mjs"

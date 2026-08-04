@@ -149,9 +149,11 @@ export function attest({ workspace, expectedCommit, output }) {
     },
   };
 
-  const destination = resolve(checkout, output);
-  mkdirSync(dirname(destination), { recursive: true });
-  writeFileSync(destination, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
+  if (output) {
+    const destination = resolve(checkout, output);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
+  }
   return result;
 }
 

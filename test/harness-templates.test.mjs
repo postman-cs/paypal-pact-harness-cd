@@ -69,6 +69,17 @@ test('drop-in Kubernetes stages declare limits and keep Postman CLI installation
   assert.match(consumer, /export HOME="\$PWD\/\.ci-home"/);
 });
 
+test('customer-owned stage verifies an externally locked bundle and never attests the customer repo as Postman-CS', () => {
+  const source = readFileSync(join(HARNESS, 'stages', 'consumer-contract-gate.vendored.yaml'), 'utf8');
+  assert.match(source, /cloneCodebase: true/);
+  assert.match(source, /\.ci\/verify-pact-harness\.mjs/);
+  assert.match(source, /--bundle "\$BUNDLE_PATH"/);
+  assert.match(source, /"\$BUNDLE_PATH\/paypal-contract-gate\.mjs" verify/);
+  assert.match(source, /postman_collection_path/);
+  assert.doesNotMatch(source, /attest-harness-source\.mjs/);
+  assert.doesNotMatch(source, /fixtures\/paypal\/orders-lower/);
+});
+
 test('complete Harness pipelines pin the repo name and attest origin, commit, and bundle before work', () => {
   const pipelines = [
     'contract-gate.broker.pipeline.yaml',
