@@ -358,12 +358,14 @@ pipeline:
                       set -eu
                       REPORTS=.contract-reports/pact-deploy
                       mkdir -p "$REPORTS"
-                      rm -f "$REPORTS/can-i-deploy.json"
+                      rm -f "$REPORTS/can-i-deploy.json" \
+                        "$REPORTS/can-i-deploy.stderr.txt"
                       test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
                         --output .pact/bin/pact
+                      set +e
                       .pact/bin/pact broker can-i-deploy \
                         --pacticipant orders-checkout-consumer \
                         --version "$CONSUMER_APP_VERSION" \
@@ -374,10 +376,15 @@ pipeline:
                         --retry-while-unknown 6 \
                         --retry-interval 10 \
                         --output json \
-                        > "$REPORTS/can-i-deploy.json"
+                        > "$REPORTS/can-i-deploy.json" \
+                        2> "$REPORTS/can-i-deploy.stderr.txt"
+                      status=$?
+                      set -e
+                      cat "$REPORTS/can-i-deploy.stderr.txt" >&2
+                      cat "$REPORTS/can-i-deploy.json"
                       node scripts/ci/assert-pact-evidence.mjs can-i-deploy \
                         --json "$REPORTS/can-i-deploy.json"
-                      cat "$REPORTS/can-i-deploy.json"
+                      [ "$status" -eq 0 ]
                     resources:
                       limits:
                         memory: 500Mi

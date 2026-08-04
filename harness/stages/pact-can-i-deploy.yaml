@@ -120,11 +120,11 @@ stage:
                 status=$?
                 set -e
                 cat "$REPORTS/can-i-deploy.stderr.txt" >&2
-                [ "$status" -eq 0 ] || exit "$status"
+                cat "$REPORTS/can-i-deploy.json"
                 node .pact-harness-source/scripts/ci/assert-pact-evidence.mjs \
                   can-i-deploy \
                   --json "$REPORTS/can-i-deploy.json"
-                cat "$REPORTS/can-i-deploy.json"
+                [ "$status" -eq 0 ]
               resources:
                 limits:
                   memory: 500Mi
