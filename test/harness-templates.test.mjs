@@ -193,3 +193,13 @@ test('GitHub Cloud collection execution uses the reviewed workspace and canonica
   assert.match(source, /provider\.collection\.canonicalSha256/);
   assert.match(source, /--cloud[\s\S]{0,250}--workspace-id[\s\S]{0,250}--expected-sha256/);
 });
+
+test('GitHub Spring proof installs the harness runtime before invoking source modules', () => {
+  const source = readFileSync(join(ROOT, '.github', 'workflows', 'contract-gate.yml'), 'utf8');
+  const workflow = YAML.parse(source);
+  const steps = workflow.jobs['spring-lower-environment'].steps;
+  const install = steps.findIndex((step) => step.run === 'npm ci');
+  const exercise = steps.findIndex((step) => step.name === 'Exercise positive and negative cases with Postman CLI');
+  assert.ok(install >= 0, 'Spring proof must install the locked yaml runtime dependency');
+  assert.ok(exercise > install, 'dependency installation must precede source-module execution');
+});

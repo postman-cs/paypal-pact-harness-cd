@@ -37,6 +37,17 @@ function successfulPostman(calls) {
   };
 }
 
+function assertOwnerOnlyWhenPosix(path) {
+  const mode = statSync(path).mode & 0o777;
+  if (process.platform === 'win32') {
+    // Windows does not implement POSIX owner/group/other permission bits. Node
+    // reports writable evidence files as 0666 even after chmod(0600).
+    assert.equal(mode & 0o111, 0, 'evidence files must never be executable');
+    return;
+  }
+  assert.equal(mode, 0o600);
+}
+
 test('cloud lower run proves workspace and digest, then executes a sealed local snapshot without secrets', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'postman-lower-cloud-'));
   const apiKey = 'PMAK-lower-runner-test';
@@ -91,7 +102,7 @@ test('cloud lower run proves workspace and digest, then executes a sealed local 
   assert.equal(createHash('sha256').update(snapshot).digest('hex'), expected);
   assert.equal(snapshot, canonicalCollectionContent(collection()));
   assert.doesNotMatch(snapshot, /server-managed/);
-  assert.equal(statSync(result.snapshotPath).mode & 0o777, 0o600);
+  assertOwnerOnlyWhenPosix(result.snapshotPath);
   const provenance = JSON.parse(readFileSync(result.provenancePath, 'utf8'));
   assert.equal(provenance.source.workspaceId, 'provider-workspace');
   assert.equal(provenance.source.collectionUid, 'user-orders');
@@ -233,7 +244,7 @@ test('fake reporter leaks are sanitized before JSON, JUnit, and text artifacts a
     assert.doesNotMatch(artifact, /PMAK-[A-Za-z0-9_-]+/);
     assert.doesNotMatch(artifact, new RegExp(demoToken));
     assert.match(artifact, /\[REDACTED\]/);
-    assert.equal(statSync(join(reports, name)).mode & 0o777, 0o600);
+    assertOwnerOnlyWhenPosix(join(reports, name));
   }
   assert.equal(result.execution.reporterArtifacts.length, 3);
   assert.ok(result.execution.reporterArtifacts.every((artifact) => artifact.sanitized));

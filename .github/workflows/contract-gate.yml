@@ -180,6 +180,9 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
+          cache: npm
+      - name: Install harness dependencies
+        run: npm ci
       - name: Test and package the Orders Spring Boot wrapper
         run: mvn -B -f demo/orders-spring/pom.xml verify
       - name: Start the lower-environment wrapper and export both route inventories
