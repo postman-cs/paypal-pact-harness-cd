@@ -135,7 +135,8 @@ pipeline:
                         --provider-version "<+pipeline.variables.PROVIDER_VERSION>"
                       git -C .ledger config user.email "ci@paypal-contracts"
                       git -C .ledger config user.name  "contract-ci"
-                      node tools/pact-harness/scripts/ledger-sync.mjs --dir .ledger \
+                      node tools/pact-harness/scripts/ledger-sync.mjs --apply --dir .ledger \
+                        --remote origin --branch main \
                         --message "record: <+pipeline.variables.PROVIDER_NAME> <+codebase.commitSha>"
               - step:
                   name: can-i-deploy across the deployed fleet (fails closed)
@@ -153,4 +154,5 @@ pipeline:
 # deploy — never from this gate:
 #   node tools/pact-harness/pact-harness.mjs record-deployment --ledger .ledger \
 #     --pacticipant <svc> --version <sha> --environment production
-#   node tools/pact-harness/scripts/ledger-sync.mjs --dir .ledger --message "deploy: ..."
+#   node tools/pact-harness/scripts/ledger-sync.mjs --apply --dir .ledger \
+#     --remote origin --branch main --message "deploy: ..."

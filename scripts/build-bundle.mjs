@@ -118,7 +118,8 @@ writeFileSync(
     'node pact-harness.mjs record-verification --ledger contracts --oas o.json --pact p.json \\',
     '  --consumer-version $SHA --provider-version $PV',
     'node pact-harness.mjs can-i-deploy --ledger contracts --pacticipant svc --version $SHA --to production',
-    'node scripts/ledger-sync.mjs --dir contracts --message "record: ..."',
+    'node scripts/ledger-sync.mjs --apply --dir /path/to/dedicated-ledger-checkout ' +
+      '--remote origin --branch main --message "record: ..."',
     '```',
     '',
     'Low-level commands: `postman-to-pact · oas-to-pact · oas-audit · oas-diff ·',

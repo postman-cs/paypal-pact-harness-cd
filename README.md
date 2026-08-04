@@ -27,7 +27,7 @@ the 18-variable Input Set or a complete versioned customer kit:
 ```bash
 mkdir -p .contract-handoff
 cp config/paypal-tpe-handoff.example.json .contract-handoff/config.json
-# Replace every Harness, connector, namespace, Broker, and Postman placeholder.
+# Replace every release, Harness, connector, namespace, Broker, and Postman placeholder.
 npm run handoff:doctor
 npm run handoff:prepare
 npm run customer:package
@@ -39,6 +39,9 @@ full-file checksums, a self-verifier, release provenance, third-party notices, a
 a CycloneDX SBOM. Cloud-mutating Postman provisioning tools are excluded. Generated
 bindings remain in the ignored `.contract-handoff/` directory and contain no
 credential values, but they are customer-confidential operational metadata.
+Configured kits are never public release or public CI artifacts; deliver the
+archive, checksum, and DELIVERY guide together through PayPal's approved
+access-controlled channel.
 
 See [`CUSTOMER-HANDOFF-KIT.md`](docs/CUSTOMER-HANDOFF-KIT.md) for the exact contents,
 verification model, and delivery workflow.
