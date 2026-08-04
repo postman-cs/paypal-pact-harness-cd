@@ -198,12 +198,14 @@ pipeline:
                       PACT_BROKER_USERNAME: pact
                       PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
+                      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                       CONSUMER_APP_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                       CONSUMER_PACT_BRANCH: <+pipeline.variables.CONSUMER_PACT_BRANCH>
                     command: |
                       set -eu
                       mkdir -p .pact/bin .pacts .contract-reports/pact-consumer
                       cp fixtures/paypal/orders-consumer.pact.json .pacts/
+                      test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
@@ -239,6 +241,7 @@ pipeline:
                       PACT_BROKER_USERNAME: pact
                       PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
+                      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                       PROVIDER_BEARER_TOKEN: <+secrets.getValue("paypal_contract_demo_token")>
                       PROVIDER_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                       PROVIDER_PACT_BRANCH: <+pipeline.variables.PROVIDER_PACT_BRANCH>
@@ -246,6 +249,7 @@ pipeline:
                       set -eu
                       REPORTS=.contract-reports/pact-provider
                       mkdir -p "$REPORTS"
+                      test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \
@@ -289,11 +293,13 @@ pipeline:
                       PACT_BROKER_USERNAME: pact
                       PACT_BROKER_PASSWORD: <+secrets.getValue("paypal_pact_broker_password")>
                       PACT_DO_NOT_TRACK: "true"
+                      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
                       PROVIDER_VERSION: <+pipeline.variables.REVIEWED_SOURCE_COMMIT>
                     command: |
                       set -eu
                       REPORTS=.contract-reports/pact-deploy
                       mkdir -p "$REPORTS"
+                      test -r "$SSL_CERT_FILE"
                       node scripts/ci/pact-broker-preflight.mjs
                       node tools/pact-harness/scripts/install-pact-cli.mjs \
                         --lock tools/pact-harness/pact-cli.lock.json \

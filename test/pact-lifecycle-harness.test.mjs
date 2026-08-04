@@ -128,6 +128,10 @@ test('the lower Broker proof keeps Postman and static gates before every Broker 
   assert.match(source, /PROVIDER_PACT_BRANCH: <\+pipeline\.variables\.PROVIDER_PACT_BRANCH>/);
   assert.match(source, /broker publish[\s\S]{0,500}--retries 0[\s\S]{0,100}--log-level error/,
     'the diagnostic Broker proof must surface the first publication error without exponential backoff');
+  assert.equal((source.match(/SSL_CERT_FILE: \/etc\/ssl\/certs\/ca-certificates\.crt/g) ?? []).length, 3,
+    'every Pact CLI Broker step must explicitly use the Debian CA bundle');
+  assert.equal((source.match(/test -r "\$SSL_CERT_FILE"/g) ?? []).length, 3,
+    'every Pact CLI Broker step must fail closed when its CA bundle is unavailable');
   assert.doesNotMatch(source, /<\+codebase\.branch>/,
     'branch, tag, PR, and manual runs must use explicit logical Pact branch inputs');
 });
