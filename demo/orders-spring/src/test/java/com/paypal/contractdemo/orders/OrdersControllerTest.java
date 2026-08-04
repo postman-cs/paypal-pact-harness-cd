@@ -37,6 +37,12 @@ class OrdersControllerTest {
       .andExpect(jsonPath("$.status").value("COMPLETED"))
       .andExpect(jsonPath("$.purchase_units[0].amount.currency_code").value("USD"));
 
+    mvc.perform(get("/v2/checkout/orders/missing-order").header(AUTHORIZATION, TOKEN))
+      .andExpect(status().isNotFound())
+      .andExpect(jsonPath("$.name").value("RESOURCE_NOT_FOUND"))
+      .andExpect(jsonPath("$.debug_id").value("contract-demo-debug-id"))
+      .andExpect(jsonPath("$.message").value("The specified resource does not exist."));
+
     mvc.perform(post("/v2/checkout/orders/5O190127TN364715T/capture").header(AUTHORIZATION, TOKEN))
       .andExpect(status().isOk())
       .andExpect(jsonPath("$.status").value("COMPLETED"));
@@ -106,7 +112,10 @@ class OrdersControllerTest {
         .header(AUTHORIZATION, TOKEN)
         .contentType(MediaType.APPLICATION_JSON)
         .content("{}"))
-      .andExpect(status().isBadRequest());
+      .andExpect(status().isOk())
+      .andExpect(jsonPath("$.state").value(""))
+      .andExpect(jsonPath("$.action").value("setup"))
+      .andExpect(jsonPath("$.applied").value(true));
   }
 
   @Test

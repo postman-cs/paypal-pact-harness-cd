@@ -12,7 +12,8 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * CI-only Pact provider-state adapter for the stateless Orders contract wrapper.
  * Real services should dispatch named states to deterministic test-data setup and
- * teardown functions. This demo has no database, so every valid state is a no-op.
+ * teardown functions. This demo has no database, so named states and the
+ * verifier's empty-state reset callback are deterministic no-ops.
  */
 @RestController
 @RequestMapping("/_pact/provider-states")
@@ -22,10 +23,7 @@ public class ProviderStateController {
   @ResponseStatus(HttpStatus.OK)
   public Map<String, Object> apply(@RequestBody Map<String, Object> request) {
     String state = String.valueOf(request.getOrDefault("state", "")).trim();
-    if (state.isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provider state is required");
-    }
-    String action = String.valueOf(request.getOrDefault("action", "setup")).trim();
+    String action = String.valueOf(request.getOrDefault("action", "setup")).trim().toLowerCase();
     if (!action.equals("setup") && !action.equals("teardown")) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provider state action must be setup or teardown");
     }

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,8 +29,15 @@ public class OrdersController {
   }
 
   @GetMapping("/{id}")
-  public Order get(@PathVariable String id) {
-    return order(id, "CAPTURE", "COMPLETED");
+  public ResponseEntity<?> get(@PathVariable String id) {
+    if (id.equals("missing-order")) {
+      return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiError(
+        "RESOURCE_NOT_FOUND",
+        "contract-demo-debug-id",
+        "The specified resource does not exist."
+      ));
+    }
+    return ResponseEntity.ok(order(id, "CAPTURE", "COMPLETED"));
   }
 
   @PatchMapping("/{id}")
@@ -96,4 +104,6 @@ public class OrdersController {
   public record PurchaseUnit(String reference_id, Amount amount) {}
 
   public record Amount(String currency_code, String value) {}
+
+  public record ApiError(String name, String debug_id, String message) {}
 }
